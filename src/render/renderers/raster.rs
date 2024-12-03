@@ -33,7 +33,6 @@ impl Renderer<(), WindowData> for RasterRenderer {
     }
 
     fn required_features() -> VkFeatureGuard<'static> {
-        // why is default not const 😭
         static FEATURES: LazyLock<VkFeatures> = LazyLock::new(|| {
             vk_features! {
                 vk::PhysicalDeviceFeatures {}
