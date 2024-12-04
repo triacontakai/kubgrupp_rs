@@ -9,16 +9,35 @@ use crate::{
     window::WindowData,
 };
 
-pub struct RaytraceRenderer {}
+pub struct RaytraceRenderer {
+    vk_lib: Entry,
+    instance: Instance,
+    device: Device,
+    acceleration_structure: vk::AccelerationStructureKHR,
+    pipeline: vk::Pipeline,
+}
 
 impl Renderer<(), WindowData> for RaytraceRenderer {
     type Error = anyhow::Error;
 
     fn new(vk_lib: &Entry, instance: &Instance, device: &Device, queue_info: QueueInfo) -> Self {
-        RaytraceRenderer {}
+        RaytraceRenderer {
+            vk_lib: vk_lib.clone(),
+            instance: instance.clone(),
+            device: device.clone(),
+            acceleration_structure: Default::default(),
+            pipeline: Default::default(),
+        }
     }
 
     fn ingest_scene(&mut self, _scene: &()) {
+        let vertices = [
+            [-0.5, -0.5, 0.0],
+            [0.0, 0.5, 0.0],
+            [0.5, -0.5, 0.0],
+        ];
+        let vertex_count = vertices.len();
+        let vertex_stride = std::mem::size_of_val(&vertices[0]);
 
     }
 
@@ -42,7 +61,13 @@ impl Renderer<(), WindowData> for RaytraceRenderer {
     fn required_features() -> VkFeatureGuard<'static> {
         static FEATURES: LazyLock<VkFeatures> = LazyLock::new(|| {
             vk_features! {
-                vk::PhysicalDeviceFeatures {}
+                vk::PhysicalDeviceFeatures {},
+                vk::PhysicalDeviceAccelerationStructureFeaturesKHR {
+                    acceleration_structure,
+                },
+                vk::PhysicalDeviceRayTracingPipelineFeaturesKHR {
+                    ray_tracing_pipeline,
+                },
             }
         });
 
@@ -52,12 +77,12 @@ impl Renderer<(), WindowData> for RaytraceRenderer {
     }
 
     fn has_required_queue_families(queue_family_info: &QueueFamilyInfo) -> bool {
-        queue_family_info.graphics_index.is_some() && queue_family_info.present_index.is_some()
+        queue_family_info.compute_index.is_some() && queue_family_info.present_index.is_some()
     }
 
     fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> QueueInfo {
         let create_info = vk::DeviceQueueCreateInfo {
-            queue_family_index: queue_family_info.graphics_index.unwrap(),
+            queue_family_index: queue_family_info.compute_index.unwrap(),
             queue_count: 1,
             p_queue_priorities: &1.0,
             ..Default::default()
