@@ -88,7 +88,14 @@ impl MeshScene {
 
         let camera = Self::parse_camera(conf);
 
-        todo!()
+        Ok(Self {
+            camera_mat: Mat4::IDENTITY,
+            lights: Vec::new(),
+            instances: Vec::new(),
+            meshes: Vec::new(),
+            miss_shader: Shader { code: vk::ShaderModule::null() },
+            hit_shaders: Vec::new(),
+        })
     }
 
     fn parse_transform(transform_str: &str) -> Result<Mat4> {
