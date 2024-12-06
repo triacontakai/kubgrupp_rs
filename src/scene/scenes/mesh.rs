@@ -78,7 +78,7 @@ impl Scene for MeshScene {
 }
 
 impl MeshScene {
-    const MAX_LIGHTS: u32 = 1000;
+    pub const MAX_LIGHTS: u32 = 1000;
 
     pub fn load_from(mut reader: impl Read) -> Result<Self> {
         let mut toml_conf = String::new();

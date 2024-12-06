@@ -1,4 +1,4 @@
-enum Token<'a> {
+pub enum Token<'a> {
     LSqBracket,
     RSqBracket,
     Semicolon,
@@ -13,11 +13,18 @@ pub struct TokenIter<'a> {
 impl<'a> TokenIter<'a> {
     pub fn new(str: &'a str) -> Self {
         Self {
-            remaining: str
+            remaining: str.trim_start()
         }
     }
 }
 
-//impl Iterator for TokenIter {
-//
-//}
+impl<'a> Iterator for TokenIter<'a> {
+    type Item = Token<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // whitespace should have been trimmed from last iteration
+        // match directly on token
+
+        todo!()
+    }
+}
