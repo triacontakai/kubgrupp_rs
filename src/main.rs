@@ -1,4 +1,5 @@
 use std::ffi::{c_char, c_void, CStr};
+use std::fs::File;
 use std::ptr;
 
 use anyhow::Result;
@@ -18,6 +19,7 @@ use env_logger::Builder;
 use log::{debug, warn, LevelFilter};
 use render::renderers::RaytraceRenderer;
 use render::Renderer;
+use scene::scenes::mesh::MeshScene;
 use scene::Scene;
 use utils::{query_queue_families, QueueFamilyInfo};
 use window::WindowData;
@@ -406,6 +408,9 @@ fn main() {
         .init();
 
     let event_loop = EventLoop::new().unwrap();
-    let mut app: App<(), RaytraceRenderer> = App::new(&event_loop, (), DEBUG_MODE).unwrap();
+
+    let file = File::open("resources/scenes/cubes.toml").expect("scene file does not exist");
+    let scene = MeshScene::load_from(file).expect("scene could not be loaded");
+    let mut app: App<MeshScene, RaytraceRenderer> = App::new(&event_loop, scene, DEBUG_MODE).unwrap();
     event_loop.run_app(&mut app).unwrap();
 }

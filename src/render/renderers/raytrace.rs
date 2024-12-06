@@ -6,6 +6,8 @@ use ash::{khr, vk, Device, Entry, Instance};
 use crate::{
     features::{vk_features, VkFeatureGuard, VkFeatures},
     render::Renderer,
+    scene::scenes::mesh::MeshScene,
+    scene::Scene,
     utils::{AllocatedBuffer, QueueFamilyInfo, QueueInfo},
     window::WindowData,
 };
@@ -137,7 +139,7 @@ impl RaytraceRenderer {
     }
 }
 
-impl Renderer<(), WindowData> for RaytraceRenderer {
+impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
     fn new(
         vk_lib: &Entry,
         instance: &Instance,
@@ -173,7 +175,7 @@ impl Renderer<(), WindowData> for RaytraceRenderer {
         }
     }
 
-    fn ingest_scene(&mut self, _scene: &()) -> anyhow::Result<()> {
+    fn ingest_scene(&mut self, scene: &MeshScene) -> anyhow::Result<()> {
         let vertices: [[f32; 3]; 3] = [[-0.5, -0.5, 0.0], [0.0, 0.5, 0.0], [0.5, -0.5, 0.0]];
         let vertex_count = vertices.len();
         let vertex_stride = std::mem::size_of_val(&vertices[0]);
@@ -348,7 +350,11 @@ impl Renderer<(), WindowData> for RaytraceRenderer {
         Ok(())
     }
 
-    fn render_to(&mut self, _updates: &(), target: &mut WindowData) -> anyhow::Result<()> {
+    fn render_to(
+        &mut self,
+        updates: &<MeshScene as Scene>::Updates,
+        target: &mut WindowData,
+    ) -> anyhow::Result<()> {
         todo!()
     }
 
