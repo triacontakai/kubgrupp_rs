@@ -6,6 +6,6 @@ enum Token<'a> {
     Integer(usize),
 }
 
-//pub struct TokenIter {
-//    struct
-//}
+pub struct TokenIter {
+
+}
