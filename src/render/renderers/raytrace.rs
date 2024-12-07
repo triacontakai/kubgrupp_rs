@@ -9,7 +9,7 @@ use crate::{
     features::{vk_features, VkFeatureGuard, VkFeatures},
     render::Renderer,
     scene::{
-        scenes::mesh::{self, MeshScene},
+        scenes::mesh::{MeshScene, Object},
         Scene,
     },
     utils::{AllocatedBuffer, QueueFamilyInfo},
@@ -17,21 +17,26 @@ use crate::{
 };
 
 pub struct RaytraceRenderer {
-    vk_lib: Entry,
-    instance: Instance,
     device: Device,
-    physical_device: vk::PhysicalDevice,
+    accel_struct_device: khr::acceleration_structure::Device,
+    rt_pipeline_device: khr::ray_tracing_pipeline::Device,
     device_properties: vk::PhysicalDeviceProperties,
+    rt_pipeline_properties: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR<'static>,
     command_pool: vk::CommandPool,
     compute_queue: vk::Queue,
-    acceleration_structure: vk::AccelerationStructureKHR,
+    mesh_buffers: Vec<(AllocatedBuffer, AllocatedBuffer)>,
+    instance_buffer: Option<AllocatedBuffer>,
+    top_as: vk::AccelerationStructureKHR,
+    top_as_buffer: Option<AllocatedBuffer>,
+    bottom_ass: Vec<vk::AccelerationStructureKHR>,
+    bottom_as_buffers: Vec<AllocatedBuffer>,
+    pipeline_layout: vk::PipelineLayout,
     pipeline: vk::Pipeline,
 }
 
 impl RaytraceRenderer {
     fn build_accel_structs(
         &self,
-        acceleration_structure: &khr::acceleration_structure::Device,
         ty: vk::AccelerationStructureTypeKHR,
         geometries: &[vk::AccelerationStructureGeometryKHR],
         primitive_counts: &[u32],
@@ -63,12 +68,13 @@ impl RaytraceRenderer {
 
             let mut size_info: vk::AccelerationStructureBuildSizesInfoKHR = Default::default();
             unsafe {
-                acceleration_structure.get_acceleration_structure_build_sizes(
-                    vk::AccelerationStructureBuildTypeKHR::DEVICE,
-                    &build_info,
-                    &[*primitive_count],
-                    &mut size_info,
-                );
+                self.accel_struct_device
+                    .get_acceleration_structure_build_sizes(
+                        vk::AccelerationStructureBuildTypeKHR::DEVICE,
+                        &build_info,
+                        &[*primitive_count],
+                        &mut size_info,
+                    );
             }
 
             let buffer = AllocatedBuffer::new(
@@ -90,7 +96,8 @@ impl RaytraceRenderer {
                 ..Default::default()
             };
             let accel_struct = unsafe {
-                acceleration_structure.create_acceleration_structure(&create_info, None)
+                self.accel_struct_device
+                    .create_acceleration_structure(&create_info, None)
             }?;
             build_info.dst_acceleration_structure = accel_struct;
 
@@ -141,7 +148,7 @@ impl RaytraceRenderer {
                 },
             )?;
 
-            acceleration_structure.cmd_build_acceleration_structures(
+            self.accel_struct_device.cmd_build_acceleration_structures(
                 build_command_buffer,
                 &build_infos,
                 &unsqueezed_build_range_infos,
@@ -174,7 +181,7 @@ impl RaytraceRenderer {
         meshes: &[Obj],
         allocator: &mut Allocator,
     ) -> anyhow::Result<(
-        Vec<vk::AccelerationStructureGeometryKHR>,
+        Vec<vk::AccelerationStructureGeometryKHR<'static>>,
         Vec<(AllocatedBuffer, AllocatedBuffer)>,
         Vec<u32>,
     )> {
@@ -183,7 +190,7 @@ impl RaytraceRenderer {
         let mut primitive_counts = Vec::new();
         for mesh in meshes {
             let vertex_count = mesh.vertices.len();
-            let vertex_stride = std::mem::size_of_val(&mesh.vertices[0]);
+            let vertex_stride = std::mem::size_of_val(&mesh.vertices[0].position);
 
             let mut vertex_buffer = AllocatedBuffer::new(
                 &self.device,
@@ -195,7 +202,11 @@ impl RaytraceRenderer {
                 MemoryLocation::CpuToGpu,
                 self.device_properties.limits,
             )?;
-            vertex_buffer.store(&mesh.vertices)?;
+            let mut real_vertices = Vec::new();
+            for v in mesh.vertices.iter() {
+                real_vertices.extend_from_slice(&v.position);
+            }
+            vertex_buffer.store(&real_vertices)?;
 
             let index_count = mesh.indices.len();
             let index_stride = std::mem::size_of_val(&mesh.indices[0]);
@@ -229,7 +240,7 @@ impl RaytraceRenderer {
                                 index_buffer.get_device_address(&self.device)
                             },
                         },
-                        index_type: vk::IndexType::UINT32,
+                        index_type: vk::IndexType::UINT16,
                         ..Default::default()
                     },
                 },
@@ -245,11 +256,14 @@ impl RaytraceRenderer {
 
     fn get_instance_geometry(
         &self,
-        acceleration_structure: &khr::acceleration_structure::Device,
-        objects: &[mesh::Object],
+        objects: &[Object],
         bottom_accel_structs: &[vk::AccelerationStructureKHR],
         allocator: &mut Allocator,
-    ) -> anyhow::Result<(vk::AccelerationStructureGeometryKHR, AllocatedBuffer, u32)> {
+    ) -> anyhow::Result<(
+        vk::AccelerationStructureGeometryKHR<'static>,
+        AllocatedBuffer,
+        u32,
+    )> {
         let mut accel_handles = Vec::new();
         for bottom_accel_struct in bottom_accel_structs {
             accel_handles.push({
@@ -258,13 +272,14 @@ impl RaytraceRenderer {
                     ..Default::default()
                 };
                 unsafe {
-                    acceleration_structure.get_acceleration_structure_device_address(&as_addr_info)
+                    self.accel_struct_device
+                        .get_acceleration_structure_device_address(&as_addr_info)
                 }
             });
         }
 
         let mut instances = Vec::new();
-        for (i, object) in objects.iter().enumerate() {
+        for object in objects {
             let mut matrix = [0f32; 16];
             object
                 .transform
@@ -276,7 +291,7 @@ impl RaytraceRenderer {
 
             instances.push(vk::AccelerationStructureInstanceKHR {
                 transform: vk::TransformMatrixKHR { matrix: matrix_3_4 },
-                instance_custom_index_and_mask: vk::Packed24_8::new(i as u32, 0xff),
+                instance_custom_index_and_mask: vk::Packed24_8::new(object.custom_index, 0xff),
                 instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
                     object.brdf_i as u32,
                     vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE.as_raw() as u8,
@@ -315,21 +330,185 @@ impl RaytraceRenderer {
 
         Ok((geometry, instance_buffer, instances.len() as u32))
     }
+
+    fn get_global_descriptor_set_layout(&self) -> anyhow::Result<vk::DescriptorSetLayout> {
+        let binding_flags_inner = [
+            vk::DescriptorBindingFlags::empty(),
+            vk::DescriptorBindingFlags::empty(),
+            vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT
+                | vk::DescriptorBindingFlags::PARTIALLY_BOUND,
+        ];
+
+        let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo {
+            binding_count: binding_flags_inner.len() as u32,
+            p_binding_flags: binding_flags_inner.as_ptr(),
+            ..Default::default()
+        };
+
+        let bindings = [
+            vk::DescriptorSetLayoutBinding {
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
+                binding: 0,
+                ..Default::default()
+            },
+            vk::DescriptorSetLayoutBinding {
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
+                stage_flags: vk::ShaderStageFlags::RAYGEN_KHR
+                    | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                binding: 1,
+                ..Default::default()
+            },
+            vk::DescriptorSetLayoutBinding {
+                descriptor_count: MeshScene::MAX_LIGHTS,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                binding: 2,
+                ..Default::default()
+            },
+        ];
+
+        let create_info = vk::DescriptorSetLayoutCreateInfo {
+            p_bindings: bindings.as_ptr(),
+            binding_count: bindings.len() as u32,
+            p_next: &raw const binding_flags as *const std::ffi::c_void,
+            ..Default::default()
+        };
+
+        unsafe {
+            Ok(self
+                .device
+                .create_descriptor_set_layout(&create_info, None)?)
+        }
+    }
+
+    fn create_pipeline(
+        &self,
+        scene: &MeshScene,
+        descriptor_set_layouts: &[vk::DescriptorSetLayout],
+    ) -> anyhow::Result<(vk::PipelineLayout, vk::Pipeline, usize)> {
+        let push_constants = vk::PushConstantRange {
+            stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
+            offset: 0,
+            size: std::mem::size_of_val(&scene.camera.perspective) as u32,
+        };
+
+        let layout_create_info = vk::PipelineLayoutCreateInfo {
+            p_set_layouts: descriptor_set_layouts.as_ptr(),
+            set_layout_count: descriptor_set_layouts.len() as u32,
+            p_push_constant_ranges: &raw const push_constants,
+            push_constant_range_count: 1,
+            ..Default::default()
+        };
+        let pipeline_layout = unsafe {
+            self.device
+                .create_pipeline_layout(&layout_create_info, None)?
+        };
+
+        let mut shader_stages = vec![
+            vk::PipelineShaderStageCreateInfo {
+                stage: vk::ShaderStageFlags::RAYGEN_KHR,
+                module: scene.raygen_shader.module(),
+                p_name: scene.raygen_shader.name().as_ptr(),
+                ..Default::default()
+            },
+            vk::PipelineShaderStageCreateInfo {
+                stage: vk::ShaderStageFlags::MISS_KHR,
+                module: scene.miss_shader.module(),
+                p_name: scene.miss_shader.name().as_ptr(),
+                ..Default::default()
+            },
+        ];
+        let mut shader_groups = vec![
+            vk::RayTracingShaderGroupCreateInfoKHR {
+                ty: vk::RayTracingShaderGroupTypeKHR::GENERAL,
+                general_shader: 0,
+                closest_hit_shader: vk::SHADER_UNUSED_KHR,
+                any_hit_shader: vk::SHADER_UNUSED_KHR,
+                intersection_shader: vk::SHADER_UNUSED_KHR,
+                ..Default::default()
+            },
+            vk::RayTracingShaderGroupCreateInfoKHR {
+                ty: vk::RayTracingShaderGroupTypeKHR::GENERAL,
+                general_shader: 1,
+                closest_hit_shader: vk::SHADER_UNUSED_KHR,
+                any_hit_shader: vk::SHADER_UNUSED_KHR,
+                intersection_shader: vk::SHADER_UNUSED_KHR,
+                ..Default::default()
+            },
+        ];
+        for hit_shader in scene.hit_shaders.iter() {
+            shader_stages.push(vk::PipelineShaderStageCreateInfo {
+                stage: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                module: hit_shader.module(),
+                p_name: hit_shader.name().as_ptr(),
+                ..Default::default()
+            });
+            shader_groups.push(vk::RayTracingShaderGroupCreateInfoKHR {
+                ty: vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP,
+                general_shader: vk::SHADER_UNUSED_KHR,
+                closest_hit_shader: shader_stages.len() as u32 - 1,
+                any_hit_shader: vk::SHADER_UNUSED_KHR,
+                intersection_shader: vk::SHADER_UNUSED_KHR,
+                ..Default::default()
+            });
+        }
+
+        let pipeline = unsafe {
+            let out = self.rt_pipeline_device.create_ray_tracing_pipelines(
+                vk::DeferredOperationKHR::null(),
+                vk::PipelineCache::null(),
+                &[vk::RayTracingPipelineCreateInfoKHR {
+                    stage_count: shader_stages.len() as u32,
+                    p_stages: shader_stages.as_ptr(),
+                    group_count: shader_groups.len() as u32,
+                    p_groups: shader_groups.as_ptr(),
+                    max_pipeline_ray_recursion_depth: 1,
+                    layout: pipeline_layout,
+                    ..Default::default()
+                }],
+                None,
+            );
+            match out {
+                Ok(x) => x[0],
+                Err((x, y)) => *x
+                    .get(0)
+                    .ok_or(anyhow!("failed to construct pipeline: {y}"))?,
+            }
+        };
+
+        Ok((pipeline_layout, pipeline, shader_groups.len()))
+    }
 }
 
 impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
     fn new(
-        vk_lib: &Entry,
+        _vk_lib: &Entry,
         instance: &Instance,
         device: &Device,
         physical_device: vk::PhysicalDevice,
         queue_family_info: &QueueFamilyInfo,
     ) -> anyhow::Result<Self> {
-        let device_properties = unsafe { instance.get_physical_device_properties(physical_device) };
+        let accel_struct_device = khr::acceleration_structure::Device::new(instance, device);
+        let rt_pipeline_device = khr::ray_tracing_pipeline::Device::new(instance, device);
+
+        let mut rt_pipeline_properties =
+            vk::PhysicalDeviceRayTracingPipelinePropertiesKHR::default();
+        let mut physical_device_properties2 = vk::PhysicalDeviceProperties2 {
+            p_next: &raw mut rt_pipeline_properties as *mut std::ffi::c_void,
+            ..Default::default()
+        };
+        unsafe {
+            instance
+                .get_physical_device_properties2(physical_device, &mut physical_device_properties2)
+        };
 
         let compute_queue_index = queue_family_info
             .compute_index
             .ok_or(anyhow!("no compute"))?;
+
         let command_pool = {
             let create_info = vk::CommandPoolCreateInfo {
                 queue_family_index: compute_queue_index,
@@ -338,103 +517,81 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             unsafe { device.create_command_pool(&create_info, None) }?
         };
         let compute_queue = unsafe { device.get_device_queue(compute_queue_index, 0) };
+
         Ok(RaytraceRenderer {
-            vk_lib: vk_lib.clone(),
-            instance: instance.clone(),
             device: device.clone(),
-            physical_device,
-            device_properties,
+            accel_struct_device,
+            rt_pipeline_device,
+            device_properties: physical_device_properties2.properties,
+            rt_pipeline_properties,
             command_pool,
             compute_queue,
-            acceleration_structure: Default::default(),
+            mesh_buffers: Default::default(),
+            instance_buffer: Default::default(),
+            top_as: Default::default(),
+            top_as_buffer: Default::default(),
+            bottom_ass: Default::default(),
+            bottom_as_buffers: Default::default(),
+            pipeline_layout: Default::default(),
             pipeline: Default::default(),
         })
     }
 
     fn ingest_scene(&mut self, scene: &MeshScene, allocator: &mut Allocator) -> anyhow::Result<()> {
-        let acceleration_structure =
-            khr::acceleration_structure::Device::new(&self.instance, &self.device);
-
         let (mesh_geometries, mesh_buffers, mesh_primitive_counts) =
             self.get_mesh_geometries(&scene.meshes, allocator)?;
+        self.mesh_buffers = mesh_buffers;
 
-        let (bottom_accel_structs, bottom_as_buffers) = self.build_accel_structs(
-            &acceleration_structure,
+        (self.bottom_ass, self.bottom_as_buffers) = self.build_accel_structs(
             vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
             &mesh_geometries,
             &mesh_primitive_counts,
             allocator,
         )?;
 
-        let (instance_geometry, instance_buffer, instance_count) = self.get_instance_geometry(
-            &acceleration_structure,
-            &scene.objects,
-            &bottom_accel_structs,
-            allocator,
-        )?;
+        let (instance_geometry, instance_buffer, instance_count) =
+            self.get_instance_geometry(&scene.objects, &self.bottom_ass, allocator)?;
+        self.instance_buffer = Some(instance_buffer);
 
-        let (top_as, top_as_buffer) = {
+        (self.top_as, self.top_as_buffer) = {
             let (top_as, mut top_as_buffer) = self.build_accel_structs(
-                &acceleration_structure,
                 vk::AccelerationStructureTypeKHR::TOP_LEVEL,
                 &[instance_geometry],
                 &[instance_count],
                 allocator,
             )?;
-            (top_as[0], top_as_buffer.remove(0))
+            (top_as[0], Some(top_as_buffer.remove(0)))
         };
 
-        let descriptor_set_layout = {
-            let binding_flags_inner = [
-                vk::DescriptorBindingFlags::empty(),
-                vk::DescriptorBindingFlags::empty(),
-                vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT
-                    | vk::DescriptorBindingFlags::PARTIALLY_BOUND,
-            ];
+        let global_descriptor_set_layout = self.get_global_descriptor_set_layout()?;
 
-            let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo {
-                binding_count: binding_flags_inner.len() as u32,
-                p_binding_flags: binding_flags_inner.as_ptr(),
-                ..Default::default()
+        let shader_group_count: usize;
+        (self.pipeline_layout, self.pipeline, shader_group_count) =
+            self.create_pipeline(scene, &[global_descriptor_set_layout])?;
+
+        let sbt_buffer = {
+            let table_data = unsafe {
+                self.rt_pipeline_device
+                    .get_ray_tracing_shader_group_handles(
+                        self.pipeline,
+                        0,
+                        shader_group_count as u32,
+                        shader_group_count
+                            * self.rt_pipeline_properties.shader_group_handle_size as usize,
+                    )?
             };
 
-            unsafe {
-                let bindings = [
-                    vk::DescriptorSetLayoutBinding {
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                        stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
-                        binding: 0,
-                        ..Default::default()
-                    },
-                    vk::DescriptorSetLayoutBinding {
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                        stage_flags: vk::ShaderStageFlags::RAYGEN_KHR
-                            | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-                        binding: 1,
-                        ..Default::default()
-                    },
-                    vk::DescriptorSetLayoutBinding {
-                        descriptor_count: MeshScene::MAX_LIGHTS,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-                        binding: 2,
-                        ..Default::default()
-                    },
-                ];
+            let mut staging_buffer = AllocatedBuffer::new(
+                &self.device,
+                allocator,
+                table_data.len() as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR,
+                MemoryLocation::CpuToGpu,
+                self.device_properties.limits
+            )?;
 
-                let create_info = vk::DescriptorSetLayoutCreateInfo {
-                    p_bindings: bindings.as_ptr(),
-                    binding_count: bindings.len() as u32,
-                    p_next: &raw const binding_flags as *const std::ffi::c_void,
-                    ..Default::default()
-                };
-                self.device
-                    .create_descriptor_set_layout(&create_info, None)?
-            }
+            staging_buffer.store(&table_data)?;
         };
-
         Ok(())
     }
 
