@@ -12,19 +12,18 @@ use crate::{
         scenes::mesh::{self, MeshScene},
         Scene,
     },
-    utils::{AllocatedBuffer, QueueFamilyInfo, QueueInfo},
+    utils::{AllocatedBuffer, QueueFamilyInfo},
     window::WindowData,
 };
 
 pub struct RaytraceRenderer {
     vk_lib: Entry,
     instance: Instance,
-    physical_device: vk::PhysicalDevice,
     device: Device,
+    physical_device: vk::PhysicalDevice,
     device_properties: vk::PhysicalDeviceProperties,
     command_pool: vk::CommandPool,
     compute_queue: vk::Queue,
-    device_memory_properties: vk::PhysicalDeviceMemoryProperties,
     acceleration_structure: vk::AccelerationStructureKHR,
     pipeline: vk::Pipeline,
 }
@@ -163,7 +162,7 @@ impl RaytraceRenderer {
                 .free_command_buffers(self.command_pool, &[build_command_buffer]);
 
             for scratch_buffer in scratch_buffers {
-                scratch_buffer.destroy(&self.device, allocator);
+                scratch_buffer.destroy(&self.device, allocator)?;
             }
         }
 
@@ -267,7 +266,10 @@ impl RaytraceRenderer {
         let mut instances = Vec::new();
         for (i, object) in objects.iter().enumerate() {
             let mut matrix = [0f32; 16];
-            object.transform.transpose().write_cols_to_slice(&mut matrix);
+            object
+                .transform
+                .transpose()
+                .write_cols_to_slice(&mut matrix);
 
             let mut matrix_3_4 = [0f32; 12];
             matrix_3_4.copy_from_slice(&matrix[0..12]);
@@ -336,22 +338,17 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             unsafe { device.create_command_pool(&create_info, None) }?
         };
         let compute_queue = unsafe { device.get_device_queue(compute_queue_index, 0) };
-        unsafe {
-            let device_memory_properties =
-                instance.get_physical_device_memory_properties(physical_device);
-            Ok(RaytraceRenderer {
-                vk_lib: vk_lib.clone(),
-                instance: instance.clone(),
-                physical_device: physical_device.clone(),
-                device: device.clone(),
-                device_properties,
-                command_pool,
-                compute_queue,
-                device_memory_properties,
-                acceleration_structure: Default::default(),
-                pipeline: Default::default(),
-            })
-        }
+        Ok(RaytraceRenderer {
+            vk_lib: vk_lib.clone(),
+            instance: instance.clone(),
+            device: device.clone(),
+            physical_device,
+            device_properties,
+            command_pool,
+            compute_queue,
+            acceleration_structure: Default::default(),
+            pipeline: Default::default(),
+        })
     }
 
     fn ingest_scene(&mut self, scene: &MeshScene, allocator: &mut Allocator) -> anyhow::Result<()> {
@@ -366,23 +363,26 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
             &mesh_geometries,
             &mesh_primitive_counts,
-            allocator
+            allocator,
         )?;
 
         let (instance_geometry, instance_buffer, instance_count) = self.get_instance_geometry(
             &acceleration_structure,
             &scene.instances,
             &bottom_accel_structs,
-            allocator
+            allocator,
         )?;
 
-        let (top_as, top_as_buffer) = self.build_accel_structs(
-            &acceleration_structure,
-            vk::AccelerationStructureTypeKHR::TOP_LEVEL,
-            &[instance_geometry],
-            &[instance_count],
-            allocator
-        )?;
+        let (top_as, top_as_buffer) = {
+            let (top_as, mut top_as_buffer) = self.build_accel_structs(
+                &acceleration_structure,
+                vk::AccelerationStructureTypeKHR::TOP_LEVEL,
+                &[instance_geometry],
+                &[instance_count],
+                allocator,
+            )?;
+            (top_as[0], top_as_buffer.remove(0))
+        };
 
         let descriptor_set_layout = {
             let binding_flags_inner = [
@@ -488,7 +488,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         queue_family_info.compute_index.is_some() && queue_family_info.present_index.is_some()
     }
 
-    fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> QueueInfo {
+    fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> Vec<vk::DeviceQueueCreateInfo> {
         let create_info = vk::DeviceQueueCreateInfo {
             queue_family_index: queue_family_info.compute_index.unwrap(),
             queue_count: 1,
@@ -496,8 +496,6 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             ..Default::default()
         };
 
-        QueueInfo {
-            infos: vec![create_info],
-        }
+        vec![create_info]
     }
 }

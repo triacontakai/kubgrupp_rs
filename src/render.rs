@@ -3,7 +3,7 @@ use std::ffi::c_char;
 use crate::{
     features::VkFeatureGuard,
     scene::Scene,
-    utils::{QueueFamilyInfo, QueueInfo},
+    utils::QueueFamilyInfo,
 };
 use ash::{vk, Device, Entry, Instance};
 use gpu_allocator::vulkan::Allocator;
@@ -33,5 +33,5 @@ where
     fn required_features() -> VkFeatureGuard<'static>;
 
     fn has_required_queue_families(queue_family_info: &QueueFamilyInfo) -> bool;
-    fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> QueueInfo;
+    fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> Vec<vk::DeviceQueueCreateInfo>;
 }

@@ -267,8 +267,8 @@ where
 
         let create_info = vk::DeviceCreateInfo {
             p_next: enabled_features.get() as *const _ as *const c_void,
-            queue_create_info_count: queue_info.infos.len() as u32,
-            p_queue_create_infos: queue_info.infos.as_ptr(),
+            queue_create_info_count: queue_info.len() as u32,
+            p_queue_create_infos: queue_info.as_ptr(),
             enabled_extension_count: enabled_extensions.len() as u32,
             pp_enabled_extension_names: enabled_extensions.as_ptr(),
             p_enabled_features: ptr::null(),

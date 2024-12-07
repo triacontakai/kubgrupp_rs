@@ -1,20 +1,7 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use anyhow::Result;
 use ash::{khr, vk, Device, Entry, Instance};
 use gpu_allocator::vulkan::*;
 use gpu_allocator::MemoryLocation;
-
-// it is fine to make DeviceQueueCreateInfo lifetime static because we are not using any of the p_next stuff
-// if we need to use those, then this kinda becomes a problem lul
-// honestly i dont really like how we have to basically just pass around the queueinfo to the renderer when literally only
-// the renderer cares about it
-// it seems like maybe there should be some subcomponent of the renderer thats responsible for device creation instead
-// i love abstractions i love abstractions i love abstractions
-pub struct QueueInfo {
-    pub infos: Vec<vk::DeviceQueueCreateInfo<'static>>,
-}
 
 #[derive(Default, Clone)]
 pub struct QueueFamilyInfo {
@@ -57,23 +44,6 @@ pub fn query_queue_families(
     }
 
     Ok(info)
-}
-
-pub fn get_memory_type_index(
-    device_memory_properties: vk::PhysicalDeviceMemoryProperties,
-    mut type_bits: u32,
-    properties: vk::MemoryPropertyFlags,
-) -> u32 {
-    for i in 0..device_memory_properties.memory_type_count {
-        if (type_bits & 1) == 1
-            && (device_memory_properties.memory_types[i as usize].property_flags & properties)
-                == properties
-        {
-            return i;
-        }
-        type_bits >>= 1;
-    }
-    0
 }
 
 pub struct AllocatedBuffer {
@@ -146,8 +116,9 @@ impl AllocatedBuffer {
         device.get_buffer_device_address(&buffer_device_address_info)
     }
 
-    pub unsafe fn destroy(self, device: &Device, allocator: &mut Allocator) {
+    pub unsafe fn destroy(self, device: &Device, allocator: &mut Allocator) -> Result<()> {
         device.destroy_buffer(self.buffer, None);
-        allocator.free(self.allocation);
+        allocator.free(self.allocation)?;
+        Ok(())
     }
 }
