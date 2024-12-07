@@ -1,12 +1,11 @@
 use std::{
-    collections::HashMap, f32::consts::PI, ffi::{CStr, CString}, fs::File, io::{BufReader, Read}, iter::Peekable, path::Path
+    f32::consts::PI, ffi::{CStr, CString}, fs::File, io::{BufReader, Read}, iter::Peekable, path::Path
 };
 
 use anyhow::{anyhow, bail, Result};
-use ash::vk;
-use glam::{Mat4, Vec2, Vec3};
+use ash::{vk, Device};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use obj::Obj;
-use serde::Deserialize;
 use toml::{Table, Value};
 
 use crate::scene::{type_lexer::{Token, TokenIter}, Scene};
@@ -20,9 +19,11 @@ pub struct MeshScene {
     pub lights: Vec<Light>,
     pub objects: Vec<Object>,
     pub meshes: Vec<Obj>,
+    pub light_meshes: Vec<(Obj, u32)>,
 
     pub raygen_shader: Shader,
     pub miss_shader: Shader,
+    pub emitter_hit_shader: Option<Shader>,
     pub hit_shaders: Vec<Shader>,
 }
 
@@ -50,7 +51,7 @@ pub enum Light {
 
 #[derive(Clone)]
 pub enum Shader {
-    Uncompiled(CString, Vec<u8>),
+    Uncompiled(CString, Box<[u32]>),
     Compiled(CString, vk::ShaderModule),
 }
 
@@ -101,7 +102,21 @@ impl Shader {
         }
     }
 
-    //pub fn compile(&mut self, instance: Instance)
+    pub fn compile(self, device: Device) -> Result<Self> {
+        match self {
+            Shader::Uncompiled(name, code) => {
+                let create_info = vk::ShaderModuleCreateInfo {
+                    code_size: code.len() * size_of::<u32>(),
+                    p_code: code.as_ptr(),
+                    ..Default::default()
+                };
+
+                let module = unsafe { device.create_shader_module(&create_info, None) }?;
+                Ok(Shader::Compiled(name, module))
+            },
+            x @ Shader::Compiled(..) => Ok(x),
+        }
+    }
 }
 
 impl MeshScene {
@@ -113,20 +128,25 @@ impl MeshScene {
 
         let conf: Table = toml_conf.parse()?;
 
-        let camera = Self::parse_toml_camera(conf);
+        let camera = Self::parse_toml_camera(&conf)?;
+
+        let mut light_meshes = Vec::new();
+        let lights = Self::parse_toml_lights(&conf, &mut light_meshes)?;
 
         Ok(Self {
-            camera: Camera { view: Mat4::IDENTITY, perspective: Mat4::IDENTITY },
+            camera,
             lights: Vec::new(),
             objects: Vec::new(),
             meshes: Vec::new(),
-            raygen_shader: Shader::Uncompiled(c"raygen".to_owned(), Vec::new()),
-            miss_shader: Shader::Uncompiled(c"miss".to_owned(), Vec::new()),
+            raygen_shader: Shader::Uncompiled(c"raygen".to_owned(), Default::default()),
+            miss_shader: Shader::Uncompiled(c"miss".to_owned(), Default::default()),
             hit_shaders: Vec::new(),
+            light_meshes,
+            emitter_hit_shader: None,
         })
     }
 
-    pub fn parse_toml_lights(conf: Table, meshes: &mut Vec<Obj>) -> Result<Vec<Light>> {
+    pub fn parse_toml_lights(conf: &Table, meshes: &mut Vec<(Obj, u32)>) -> Result<Vec<Light>> {
         let Value::Array(light_confs) = conf.get("light").ok_or(anyhow!("no lights provided"))? else {
             bail!("lights field must be an array of lights");
         };
@@ -138,24 +158,49 @@ impl MeshScene {
                 bail!("light type must be a string");
             };
 
-            let light = match light_type.as_str() {
+            let color = Self::parse_toml_vec3(conf.get("color").ok_or(anyhow!("no color field found for light"))?)?;
+
+            match light_type.as_str() {
                 "point" => {
-                    let color = Self::parse_toml_vec3(conf.get("color").ok_or(anyhow!("no color field found for light"))?)?;
                     let position = Self::parse_toml_vec3(conf.get("position").ok_or(anyhow!("no top_left field found for light"))?)?;
-                    Light::Point { color, position, }
+                    lights.push(Light::Point { color, position, });
                 },
                 "area" => {
+                    let transform = Self::parse_toml_transform(conf.get("transform").ok_or(anyhow!("no transform field provided"))?)?;
                     let mesh_file = Self::parse_toml_file(MESHES_DIR, conf.get("mesh").ok_or(anyhow!("no mesh file provided"))?)?;
                     let reader = BufReader::new(mesh_file);
 
                     let mesh: Obj = obj::load_obj(reader)?;
 
-                    todo!()
+                    let start_idx = lights.len();
+
+                    // load triangles to get triangle lights
+                    let triangles = mesh.indices.chunks_exact(3);
+                    if !triangles.remainder().is_empty() {
+                        bail!("obj face list was not a multiple of 3 in length")
+                    }
+                    for triangle in triangles {
+                        let vertices: Vec<_> = triangle.into_iter().map(|&i| {
+                            let pos = Vec4::from((Vec3::from_array(mesh.vertices[i as usize].position), 1f32));
+                            let v = transform * pos;
+
+                            Vec3::new(v.x, v.y, v.z)
+                        }).collect();
+                        let e1 = vertices[1] - vertices[0];
+                        let e2 = vertices[2] - vertices[0];
+                        let normal = e1.cross(e2).normalize();
+
+                        lights.push(Light::Triangle {
+                            color,
+                            vertices: vertices.try_into().unwrap(),
+                            normal,
+                        })
+                    }
+
+                    meshes.push((mesh, start_idx as u32));
                 }
                 _ => bail!("unknown light type"),
             };
-
-            lights.push(light);
         }
 
         Ok(lights)
@@ -357,7 +402,7 @@ impl MeshScene {
         })
     }
 
-    fn parse_toml_camera(conf: Table) -> Result<Camera> {
+    fn parse_toml_camera(conf: &Table) -> Result<Camera> {
         let Some(Value::Table(camera_table)) = conf.get("camera") else {
             bail!("camera must be a table")
         };
