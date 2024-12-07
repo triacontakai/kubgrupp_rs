@@ -1,5 +1,5 @@
 use std::{
-    f32::consts::PI, ffi::{CStr, CString}, fs::File, io::{BufReader, Read}, iter::Peekable, path::Path
+    collections::HashMap, f32::consts::PI, ffi::{CStr, CString}, fs::File, io::{BufReader, Read}, iter::Peekable, path::Path
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -19,12 +19,9 @@ pub struct MeshScene {
     pub lights: Vec<Light>,
     pub objects: Vec<Object>,
     pub meshes: Vec<Obj>,
-    pub light_meshes: Vec<Obj>,
-    pub light_indices: Vec<u32>,
 
     pub raygen_shader: Shader,
     pub miss_shader: Shader,
-    pub emitter_hit_shader: Option<Shader>,
     pub hit_shaders: Vec<Shader>,
 }
 
@@ -64,6 +61,8 @@ pub struct Object {
     pub brdf_i: usize,
     pub brdf_params: Vec<u8>,
     pub alignment: usize,
+
+    pub custom_index: u32,
 }
 
 #[derive(Debug, PartialEq)]
@@ -130,15 +129,8 @@ impl MeshScene {
 
         let camera = Self::parse_toml_camera(&conf)?;
 
-        let mut light_meshes_idx = Vec::new();
-        let lights = Self::parse_toml_lights(&conf, &mut light_meshes_idx)?;
-
-        let mut light_meshes = Vec::new();
-        let mut light_indices = Vec::new();
-        for (light_mesh, idx) in light_meshes_idx {
-            light_meshes.push(light_mesh);
-            light_indices.push(idx);
-        }
+        //let mut meshes = Vec::new();
+        //let lights = Self::parse_toml_lights(&conf)?;
 
         Ok(Self {
             camera,
@@ -148,25 +140,43 @@ impl MeshScene {
             raygen_shader: Shader::Uncompiled(c"raygen".to_owned(), Default::default()),
             miss_shader: Shader::Uncompiled(c"miss".to_owned(), Default::default()),
             hit_shaders: Vec::new(),
-            light_meshes,
-            light_indices,
-            emitter_hit_shader: None,
         })
     }
 
-    pub fn parse_toml_meshes(conf: &Table) -> Result<Vec<Obj>> {
-        let Value::Array(obj_confs) = conf.get("object").ok_or(anyhow!("no objects field provided"))? else {
-            bail!("objects field must be an array of objects");
-        };
-
-        let meshes = Vec::new();
-
-        //m
-
-        Ok(meshes)
+    fn get_field<'a, 'b>(conf: &'a Table, field: &'b str) -> Result<&'a Value> {
+        conf.get(field).ok_or(anyhow!("field {} not provided", field))
     }
 
-    pub fn parse_toml_lights(conf: &Table, meshes: &mut Vec<(Obj, u32)>) -> Result<Vec<Light>> {
+    //fn parse_toml_meshes(conf: &Table) -> Result<(Vec<Obj>, HashMap<String, u32>)> {
+    //    let Value::Array(obj_confs) = Self::get_field(conf, "object")? else {
+    //        bail!("objects field must be an array of objects");
+    //    };
+
+    //    let Value::Array(light_confs) = Self::get_field(conf, "light")? else {
+    //        bail!("lights field must be an array of objects");
+    //    };
+
+    //    // get only the area light configs
+    //    let area_lights = light_confs.iter().filter(|x| )
+
+    //    let obj_confs = obj_confs.clone().extend(light)
+
+    //    let meshes = Vec::new();
+
+    //    for obj in obj_confs {
+    //        let Value::Table(obj) = obj else {
+    //            bail!("objects array must only contain objects, but found {}", obj);
+    //        };
+
+    //        let Value::String(file_name) = Self::get_field(obj, "mesh") else {
+    //            bail!("")
+    //        };
+    //    }
+
+    //    Ok(meshes)
+    //}
+
+    fn parse_toml_lights(conf: &Table, meshes: &[Obj]) -> Result<Vec<Light>> {
         let Value::Array(light_confs) = conf.get("light").ok_or(anyhow!("no lights field provided"))? else {
             bail!("lights field must be an array of lights");
         };
@@ -212,8 +222,6 @@ impl MeshScene {
                             vertices: vertices.try_into().unwrap(),
                         })
                     }
-
-                    meshes.push((mesh, start_idx as u32));
                 }
                 _ => bail!("unknown light type"),
             };
