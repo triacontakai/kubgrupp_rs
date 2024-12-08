@@ -1,11 +1,11 @@
 use std::{
-    alloc::{self, alloc, Layout}, collections::HashMap, f32::consts::PI, ffi::{CStr, CString}, fs::File, io::{BufReader, Read}, iter::Peekable, mem, path::Path, ptr::NonNull
+    alloc::{self, Layout}, collections::HashMap, f32::consts::PI, ffi::{CStr, CString}, fs::File, io::Read, iter::Peekable, path::Path, ptr::NonNull
 };
 
 use anyhow::{anyhow, bail, Result};
 use ash::{vk, Device};
 use bytemuck::BoxBytes;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use log::warn;
 use tobj::Model;
 use toml::{map::Map, Table, Value};
@@ -17,7 +17,7 @@ const SPIRV_DIR: &str = "resources/shaders/spv/";
 const SPIRV_EXTENSION: &str = ".spv";
 const SPIRV_MAGIC: u32 = 0x07230203;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MeshScene {
     pub camera: Camera,
     pub lights: Vec<Light>,
@@ -56,7 +56,7 @@ pub enum Shader {
     Compiled(CString, vk::ShaderModule),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Object {
     pub transform: Mat4,
 
@@ -66,6 +66,7 @@ pub struct Object {
     pub brdf_params: Vec<u8>,
     pub alignment: usize,
 
+    // this is pretty much just the base of the mesh in the list of all vertices
     pub vertex_index: u32,
     // this one is probably just going to be the same as gl_InstanceID
     // but added flexibility is good in case we decide to change
@@ -146,21 +147,21 @@ impl ShaderType {
         }
     }
 
-    fn size(&self) -> usize {
-        match self {
-            ShaderType::Float => 4,
-            ShaderType::Vec3 => 12,
-            ShaderType::Vec2 => 8,
-            ShaderType::UInt => 4,
-            ShaderType::Int => 4,
-            ShaderType::Array(shader_type, size) => {
-                // this is technically more complicated because alignment can be above size
-                // but for the types we care about this is not true
-                // all the alignments are 4 anyway lol
-                shader_type.size() * (*size) as usize
-            },
-        }
-    }
+    //fn size(&self) -> usize {
+    //    match self {
+    //        ShaderType::Float => 4,
+    //        ShaderType::Vec3 => 12,
+    //        ShaderType::Vec2 => 8,
+    //        ShaderType::UInt => 4,
+    //        ShaderType::Int => 4,
+    //        ShaderType::Array(shader_type, size) => {
+    //            // this is technically more complicated because alignment can be above size
+    //            // but for the types we care about this is not true
+    //            // all the alignments are 4 anyway lol
+    //            shader_type.size() * (*size) as usize
+    //        },
+    //    }
+    //}
 }
 
 impl MeshScene {
@@ -181,18 +182,17 @@ impl MeshScene {
 
         // load objects before lights
         // this is to give them the correct brdf_params_index
-
-        let mut objects = Vec::new();
+        let mut objects = Self::parse_toml_objects(&conf, &mesh_map, &meshes, &shaders.rchit, &shader_type_map)?;
         let lights = Self::parse_toml_lights(&conf, &mesh_map, &meshes, &mut objects)?;
 
         Ok(Self {
             camera,
-            lights: Vec::new(),
-            objects: Vec::new(),
+            lights,
+            objects,
             meshes,
-            raygen_shader: Shader::Uncompiled(c"raygen".to_owned(), Default::default()),
-            miss_shader: Shader::Uncompiled(c"miss".to_owned(), Default::default()),
-            hit_shaders: Vec::new(),
+            raygen_shader: shaders.raygen,
+            miss_shader: shaders.miss,
+            hit_shaders: shaders.rchit,
         })
     }
 
@@ -221,15 +221,153 @@ impl MeshScene {
         }
     }
 
+    fn parse_toml_objects(
+        conf: &Table,
+        mesh_map: &HashMap<String, u32>,
+        meshes: &[Model],
+        shaders: &Vec<Shader>,
+        type_map: &HashMap<String, Vec<ShaderType>>
+    ) -> Result<Vec<Object>> {
+        // get primitive start offsets of meshes
+        let mut offset = 0;
+        let start_offsets: Vec<_> = meshes.iter().map(|m| {
+            let num_vertices = m.mesh.indices.len();
+            let this_offset = offset;
+            offset += num_vertices;
+
+            this_offset
+        }).collect();
+
+        let mut objects = Vec::new();
+
+        let object_confs = Self::get_array(conf, "object")?;
+        for object in object_confs {
+            let Value::Table(object) = object else {
+                bail!("object should be a table");
+            };
+
+            let mesh_name = Self::get_string(object, "mesh")?;
+            let transform = Self::parse_toml_transform(Self::get_field(object, "transform")?)?;
+
+            let brdf_info = Self::get_table(object, "brdf")?;
+            let brdf_name = Self::get_string(brdf_info, "name")?;
+            let brdf_fields = Self::get_array(brdf_info, "fields")?;
+            let field_types = type_map.get(brdf_name).ok_or(anyhow!("undefined brdf name: {}", brdf_name))?;
+
+            if field_types.len() != brdf_fields.len() {
+                bail!("expected number of fields ({}) doesn't match up with provided fields ({})", field_types.len(), brdf_fields.len());
+            }
+
+            let mut datas = Vec::new();
+            for (field, type_info) in brdf_fields.iter().zip(field_types) {
+                // similar to array comment in parse_toml_field - technically there can be padding between fields
+                // but like there will not be :)
+                let data = Self::parse_toml_field(field, type_info)?;
+                datas.extend_from_slice(&data);
+            }
+
+            let brdf_name = CString::new(brdf_name.clone())?;
+            let brdf_i = shaders.iter().position(|x| x.name() == &brdf_name[..]).ok_or(anyhow!("undefined brdf: {:?}", brdf_name))?;
+            let mesh_i = *mesh_map.get(mesh_name).ok_or(anyhow!("asd"))? as usize;
+            let vertex_index = start_offsets[mesh_i] as u32;
+
+            let brdf_params_index = objects.len() as u32;
+
+            objects.push(Object {
+                transform,
+                mesh_i,
+                brdf_i,
+                brdf_params: datas,
+                alignment: 4, // TODO: dont hardcode this (sue me)
+                vertex_index,
+                brdf_params_index,
+            })
+        }
+
+        Ok(objects)
+    }
+
+    fn parse_toml_field(field: &Value, type_info: &ShaderType) -> Result<Vec<u8>> {
+        match type_info {
+            ShaderType::Float => {
+                let float = Self::parse_toml_f32(field)?;
+                Ok(float.to_le_bytes().to_vec())
+            },
+            ShaderType::Vec3 => {
+                let Value::Array(array) = field else {
+                    bail!("vec3 type requires array of length 3");
+                };
+
+                if array.len() != 3 {
+                    bail!("vec3 type requires array of length 3");
+                }
+
+                let x = Self::parse_toml_f32(&array[0])?;
+                let y = Self::parse_toml_f32(&array[1])?;
+                let z = Self::parse_toml_f32(&array[2])?;
+
+                let bytes: [u8; 12] = bytemuck::cast(Vec3::new(x, y, z));
+                Ok(bytes.to_vec())
+            },
+            ShaderType::Vec2 => {
+                let Value::Array(array) = field else {
+                    bail!("vec2 type requires array of length 2");
+                };
+
+                if array.len() != 2 {
+                    bail!("vec2 type requires array of length 2");
+                }
+
+                let x = Self::parse_toml_f32(&array[0])?;
+                let y = Self::parse_toml_f32(&array[1])?;
+
+                let bytes: [u8; 8] = bytemuck::cast(Vec2::new(x, y));
+                Ok(bytes.to_vec())
+            },
+            ShaderType::UInt => {
+                let &Value::Integer(num) = field else {
+                    bail!("uint type requires integer")
+                };
+
+                let num: u32 = num.try_into()?;
+                Ok(num.to_le_bytes().to_vec())
+            },
+            ShaderType::Int => {
+                let &Value::Integer(num) = field else {
+                    bail!("int type requires integer")
+                };
+
+                let num: i32 = num.try_into()?;
+                Ok(num.to_le_bytes().to_vec())
+            },
+            ShaderType::Array(shader_type, size) => {
+                let Value::Array(array) = field else {
+                    bail!("array type requires toml array");
+                };
+
+                let mut full_data = Vec::new();
+                let datas = array.iter().map(|f| Self::parse_toml_field(f, shader_type));
+                for data in datas {
+                    // technically there should be padding for alignment
+                    // but with the types we are using w/ layout scalar everything has same alignment (4)
+                    // so who cares
+                    full_data.extend_from_slice(&data?[..]);
+                }
+
+                Ok(full_data)
+            },
+        }
+    }
+
     fn parse_toml_shaders(conf: &Table) -> Result<(Shaders, HashMap<String, Vec<ShaderType>>)> {
         let Value::Table(global_shaders) = Self::get_field(conf, "global_shaders")? else {
             bail!("global_shaders must be a table");
         };
         let global_shaders = Self::get_table(conf, "global_shaders")?;
 
-        let raygen = Self::parse_toml_shader(Self::get_field(global_shaders, "raygen")?)?;
-        let miss = Self::parse_toml_shader(Self::get_field(global_shaders, "miss")?)?;
-        let emitter_rchit = Self::parse_toml_shader(Self::get_field(global_shaders, "emitter_hit")?)?;
+        let raygen = Self::parse_toml_shader(Self::get_field(global_shaders, "raygen")?, "raygen")?;
+        let miss = Self::parse_toml_shader(Self::get_field(global_shaders, "miss")?, "miss")?;
+        let emitter_rchit = Self::parse_toml_shader(Self::get_field(global_shaders, "emitter_hit")?, "emitter_hit")?;
 
         // parse shaders in brdfs
         // these also include types
@@ -246,7 +384,7 @@ impl MeshScene {
             };
 
             let name = Self::get_string(brdf, "name")?;
-            let chit_shader = Self::parse_toml_shader(Self::get_field(brdf, "chit_shader")?)?;
+            let chit_shader = Self::parse_toml_shader(Self::get_field(brdf, "chit_shader")?, name)?;
 
             let fields = Self::get_array(brdf, "field")?;
             let mut shader_types = Vec::new();
@@ -254,7 +392,6 @@ impl MeshScene {
                 let Value::Table(field) = field else {
                     bail!("field must be a table");
                 };
-
 
                 let shader_type = Self::parse_type_str(Self::get_string(field, "type")?)?;
                 shader_types.push(shader_type);
@@ -272,7 +409,7 @@ impl MeshScene {
         }, type_map))
     }
 
-    fn parse_toml_shader(name: &Value) -> Result<Shader> {
+    fn parse_toml_shader(name: &Value, shader_name: &str) -> Result<Shader> {
         let Value::String(name) = name else {
             bail!("shader path must be a string");
         };
@@ -317,7 +454,7 @@ impl MeshScene {
             bail!("invalid SPIR-V magic number");
         }
 
-        Ok(Shader::Uncompiled(CString::new(&name[..])?, code))
+        Ok(Shader::Uncompiled(CString::new(shader_name)?, code))
     }
 
     fn parse_toml_meshes(conf: &Table) -> Result<(Vec<Model>, HashMap<String, u32>)> {
@@ -739,12 +876,12 @@ mod tests {
         let conf: Table = toml_conf.parse().unwrap();
 
         let (meshes,mesh_map) = MeshScene::parse_toml_meshes(&conf).unwrap();
-        dbg!(meshes, mesh_map);
+        //dbg!(meshes, mesh_map);
     }
 
     #[test]
     fn test_load_shader() {
-        let shader = MeshScene::parse_toml_shader(&Value::String("flat.rchit".to_string())).unwrap();
+        let shader = MeshScene::parse_toml_shader(&Value::String("flat.rchit".to_string()), "flat").unwrap();
     }
 
     #[test]
@@ -756,5 +893,12 @@ mod tests {
         let conf: Table = toml_conf.parse().unwrap();
 
         let (shaders, type_map) = MeshScene::parse_toml_shaders(&conf).unwrap();
+    }
+
+    #[test]
+    fn test_load_scene() {
+        let mut file = File::open("resources/scenes/cubes.toml").unwrap();
+        let scene = MeshScene::load_from(file).unwrap();
+        //dbg!(scene);
     }
 }
