@@ -66,13 +66,17 @@ pub struct Object {
     pub brdf_params: Vec<u8>,
     pub alignment: usize,
 
-    pub custom_index: u32,
+    pub vertex_index: u32,
+    // this one is probably just going to be the same as gl_InstanceID
+    // but added flexibility is good in case we decide to change
+    pub brdf_params_index: u32,
 }
 
 #[derive(Debug, PartialEq)]
 enum ShaderType {
     Float,
     Vec3,
+    Vec2,
     UInt,
     Int,
     Array(Box<ShaderType>, u64),
@@ -130,6 +134,35 @@ impl Shader {
     }
 }
 
+impl ShaderType {
+    fn alignment(&self) -> usize {
+        match self {
+            ShaderType::Float => 4,
+            ShaderType::Vec3 => 4,
+            ShaderType::Vec2 => 4,
+            ShaderType::UInt => 4,
+            ShaderType::Int => 4,
+            ShaderType::Array(shader_type, _) => shader_type.alignment(),
+        }
+    }
+
+    fn size(&self) -> usize {
+        match self {
+            ShaderType::Float => 4,
+            ShaderType::Vec3 => 12,
+            ShaderType::Vec2 => 8,
+            ShaderType::UInt => 4,
+            ShaderType::Int => 4,
+            ShaderType::Array(shader_type, size) => {
+                // this is technically more complicated because alignment can be above size
+                // but for the types we care about this is not true
+                // all the alignments are 4 anyway lol
+                shader_type.size() * (*size) as usize
+            },
+        }
+    }
+}
+
 impl MeshScene {
     pub const MAX_LIGHTS: u32 = 1000;
     pub const MAX_OBJECTS: u32 = 1000;
@@ -146,8 +179,11 @@ impl MeshScene {
         let (shaders, shader_type_map) = Self::parse_toml_shaders(&conf)?;
         let (meshes, mesh_map) = Self::parse_toml_meshes(&conf)?;
 
-        //let mut meshes = Vec::new();
-        //let lights = Self::parse_toml_lights(&conf)?;
+        // load objects before lights
+        // this is to give them the correct brdf_params_index
+
+        let mut objects = Vec::new();
+        let lights = Self::parse_toml_lights(&conf, &mesh_map, &meshes, &mut objects)?;
 
         Ok(Self {
             camera,
@@ -339,7 +375,7 @@ impl MeshScene {
         Ok((meshes, mesh_map))
     }
 
-    fn parse_toml_lights(conf: &Table, mesh_map: &HashMap<String, u32>) -> Result<Vec<Light>> {
+    fn parse_toml_lights(conf: &Table, mesh_map: &HashMap<String, u32>, meshes: &[Model], objects: &mut Vec<Object>) -> Result<Vec<Light>> {
         let Value::Array(light_confs) = conf.get("light").ok_or(anyhow!("no lights field provided"))? else {
             bail!("lights field must be an array of lights");
         };
@@ -364,17 +400,9 @@ impl MeshScene {
                 "area" => {
                     let transform = Self::parse_toml_transform(light_conf.get("transform").ok_or(anyhow!("no transform field provided"))?)?;
 
-                    let mesh_path = Path::new(MESHES_DIR).join(Self::get_string(&light_conf, "mesh")?);
-                    let (mesh, _)  = tobj::load_obj(mesh_path, &tobj::GPU_LOAD_OPTIONS)?;
-                    // only take the first model
-                    if mesh.len() > 1 {
-                        warn!("mesh file has {} meshes - only using first ({})", mesh.len(), mesh[0].name);
-                    }
-
-                    let Some(mesh) = mesh.into_iter().next() else {
-                        bail!("somehow failed to load light mesh after loading it before");
-                    };
-                    let mesh = mesh.mesh;
+                    let mesh_name = Self::get_string(&light_conf, "mesh")?;
+                    let mesh_i = *mesh_map.get(mesh_name).ok_or(anyhow!("no such mesh: {}", mesh_name))? as usize;
+                    let mesh = &meshes[mesh_i].mesh;
 
                     let start_idx = lights.len();
 
@@ -396,6 +424,16 @@ impl MeshScene {
                             vertices: vertices.try_into().unwrap(),
                         })
                     }
+
+                    objects.push(Object {
+                        transform,
+                        mesh_i,
+                        brdf_i: 0, // emitter hit brdf is always 0
+                        brdf_params: Vec::new(),
+                        alignment: 1,
+                        vertex_index: start_idx as u32, // vertex index is actually light index
+                        brdf_params_index: 0, // this will be ignored by the emitter hit shader (color is in light info)
+                    });
                 }
                 _ => bail!("unknown light type"),
             };
@@ -596,6 +634,7 @@ impl MeshScene {
             "int" => ShaderType::Int,
             "uint" => ShaderType::UInt,
             "vec3" => ShaderType::Vec3,
+            "vec2" => ShaderType::Vec2,
             s => bail!("invalid typename: {s}")
         })
     }
@@ -686,7 +725,7 @@ mod tests {
 
         let conf: Table = toml_conf.parse().unwrap();
 
-        //let lights = MeshScene::parse_toml_lights(&conf, &mut light_meshes).unwrap();
+        //let lights = MeshScene::parse_toml_lights(&conf, ERM).unwrap();
         //println!("{:?}", lights);
         //println!("{:?}", light_meshes);
     }
@@ -700,6 +739,7 @@ mod tests {
         let conf: Table = toml_conf.parse().unwrap();
 
         let (meshes,mesh_map) = MeshScene::parse_toml_meshes(&conf).unwrap();
+        dbg!(meshes, mesh_map);
     }
 
     #[test]
@@ -716,7 +756,5 @@ mod tests {
         let conf: Table = toml_conf.parse().unwrap();
 
         let (shaders, type_map) = MeshScene::parse_toml_shaders(&conf).unwrap();
-
-        dbg!(shaders, type_map);
     }
 }
