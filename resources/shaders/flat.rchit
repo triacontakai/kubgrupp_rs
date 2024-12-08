@@ -8,10 +8,14 @@
 
 layout(location = 0) rayPayloadInEXT RayPayload ray_info;
 
-layout(set = 1, binding = 0) uniform Fields {
+struct BrdfParams {
     vec3 albedo;
-} instance_info[];
+};
+
+layout(set = 0, binding = 5) readonly buffer Fields {
+    BrdfParams params[];
+} instance_info;
 
 void main() {
-    ray_info.rad = instance_info[nonuniformEXT(gl_InstanceID)].albedo;
+    ray_info.rad = instance_info.params[nonuniformEXT(gl_InstanceID)].albedo;
 }

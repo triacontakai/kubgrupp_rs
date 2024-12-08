@@ -37,12 +37,8 @@ pub struct RaytraceRenderer {
     miss_region: vk::StridedDeviceAddressRegionKHR,
     hit_region: vk::StridedDeviceAddressRegionKHR,
     callable_region: vk::StridedDeviceAddressRegionKHR,
-    global_descriptor_pool: vk::DescriptorPool,
-    offsets_descriptor_pool: vk::DescriptorPool,
-    brdf_params_descriptor_pool: vk::DescriptorPool,
-    global_descriptor_set: vk::DescriptorSet,
-    offsets_descriptor_set: vk::DescriptorSet,
-    brdf_params_descriptor_set: vk::DescriptorSet,
+    descriptor_pool: vk::DescriptorPool,
+    descriptor_set: vk::DescriptorSet,
     storage_image: vk::Image,
     storage_image_view: vk::ImageView,
     storage_image_allocation: Allocation,
@@ -342,23 +338,9 @@ impl RaytraceRenderer {
         Ok((geometry, instance_buffer, instances.len() as u32))
     }
 
-    fn get_global_descriptor_set_layout(
+    fn get_descriptor_set_layout(
         &self,
-    ) -> anyhow::Result<(vk::DescriptorSetLayout, Vec<vk::DescriptorPoolSize>, u32)> {
-        let binding_flags_inner = [
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT
-                | vk::DescriptorBindingFlags::PARTIALLY_BOUND,
-        ];
-
-        let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo {
-            binding_count: binding_flags_inner.len() as u32,
-            p_binding_flags: binding_flags_inner.as_ptr(),
-            ..Default::default()
-        };
-
+    ) -> anyhow::Result<(vk::DescriptorSetLayout, Vec<vk::DescriptorPoolSize>)> {
         let bindings = [
             vk::DescriptorSetLayoutBinding {
                 descriptor_count: 1,
@@ -375,6 +357,7 @@ impl RaytraceRenderer {
                 binding: 1,
                 ..Default::default()
             },
+            // vertices and normals
             vk::DescriptorSetLayoutBinding {
                 descriptor_count: 1,
                 descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
@@ -383,11 +366,28 @@ impl RaytraceRenderer {
                 binding: 2,
                 ..Default::default()
             },
+            // lights
             vk::DescriptorSetLayoutBinding {
-                descriptor_count: MeshScene::MAX_LIGHTS,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
                 stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
                 binding: 3,
+                ..Default::default()
+            },
+            // offsets
+            vk::DescriptorSetLayoutBinding {
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                binding: 4,
+                ..Default::default()
+            },
+            // brdf params
+            vk::DescriptorSetLayoutBinding {
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                binding: 5,
                 ..Default::default()
             },
         ];
@@ -395,7 +395,6 @@ impl RaytraceRenderer {
         let create_info = vk::DescriptorSetLayoutCreateInfo {
             p_bindings: bindings.as_ptr(),
             binding_count: bindings.len() as u32,
-            p_next: &raw const binding_flags as *const std::ffi::c_void,
             ..Default::default()
         };
 
@@ -412,50 +411,7 @@ impl RaytraceRenderer {
             });
         }
 
-        Ok((layout, descriptor_sizes, MeshScene::MAX_LIGHTS))
-    }
-
-    fn get_per_object_descriptor_set_layout(
-        &self,
-    ) -> anyhow::Result<(vk::DescriptorSetLayout, Vec<vk::DescriptorPoolSize>, u32)> {
-        let binding_flags_inner = [vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT
-            | vk::DescriptorBindingFlags::PARTIALLY_BOUND];
-
-        let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo {
-            binding_count: binding_flags_inner.len() as u32,
-            p_binding_flags: binding_flags_inner.as_ptr(),
-            ..Default::default()
-        };
-
-        let bindings = [vk::DescriptorSetLayoutBinding {
-            descriptor_count: MeshScene::MAX_OBJECTS,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-            binding: 0,
-            ..Default::default()
-        }];
-
-        let create_info = vk::DescriptorSetLayoutCreateInfo {
-            p_bindings: bindings.as_ptr(),
-            binding_count: bindings.len() as u32,
-            p_next: &raw const binding_flags as *const std::ffi::c_void,
-            ..Default::default()
-        };
-
-        let layout = unsafe {
-            self.device
-                .create_descriptor_set_layout(&create_info, None)?
-        };
-
-        let mut descriptor_sizes = Vec::new();
-        for binding in bindings {
-            descriptor_sizes.push(vk::DescriptorPoolSize {
-                ty: binding.descriptor_type,
-                descriptor_count: binding.descriptor_count,
-            });
-        }
-
-        Ok((layout, descriptor_sizes, MeshScene::MAX_OBJECTS))
+        Ok((layout, descriptor_sizes))
     }
 
     fn create_pipeline(
@@ -731,7 +687,6 @@ impl RaytraceRenderer {
         &self,
         layout: vk::DescriptorSetLayout,
         sizes: &[vk::DescriptorPoolSize],
-        bindless_count: u32,
     ) -> anyhow::Result<(vk::DescriptorPool, vk::DescriptorSet)> {
         let pool = {
             let pool_info = vk::DescriptorPoolCreateInfo {
@@ -745,20 +700,12 @@ impl RaytraceRenderer {
         };
 
         let set = unsafe {
-            let mut allocate_info = vk::DescriptorSetAllocateInfo {
+            let allocate_info = vk::DescriptorSetAllocateInfo {
                 descriptor_pool: pool,
                 p_set_layouts: &raw const layout,
                 descriptor_set_count: 1,
                 ..Default::default()
             };
-            if bindless_count > 0 {
-                let count_allocate_info = vk::DescriptorSetVariableDescriptorCountAllocateInfo {
-                    descriptor_set_count: 1,
-                    p_descriptor_counts: &raw const bindless_count,
-                    ..Default::default()
-                };
-                allocate_info.p_next = &raw const count_allocate_info as *const std::ffi::c_void;
-            }
             self.device.allocate_descriptor_sets(&allocate_info)?[0]
         };
 
@@ -945,12 +892,8 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             miss_region: Default::default(),
             hit_region: Default::default(),
             callable_region: Default::default(),
-            global_descriptor_pool: Default::default(),
-            offsets_descriptor_pool: Default::default(),
-            brdf_params_descriptor_pool: Default::default(),
-            global_descriptor_set: Default::default(),
-            offsets_descriptor_set: Default::default(),
-            brdf_params_descriptor_set: Default::default(),
+            descriptor_pool: Default::default(),
+            descriptor_set: Default::default(),
             storage_image: Default::default(),
             storage_image_view: Default::default(),
             storage_image_allocation: Default::default(),
@@ -992,25 +935,11 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             (top_as[0], Some(top_as_buffer.remove(0)))
         };
 
-        let (global_descriptor_set_layout, global_descriptor_sizes, global_bindless_count) =
-            self.get_global_descriptor_set_layout()?;
-        let (offsets_descriptor_set_layout, offsets_descriptor_sizes, offsets_bindless_count) =
-            self.get_per_object_descriptor_set_layout()?;
-        let (
-            brdf_params_descriptor_set_layout,
-            brdf_params_descriptor_sizes,
-            brdf_params_bindless_count,
-        ) = self.get_per_object_descriptor_set_layout()?;
+        let (descriptor_set_layout, descriptor_sizes) = self.get_descriptor_set_layout()?;
 
         let shader_group_count: usize;
-        (self.pipeline_layout, self.pipeline, shader_group_count) = self.create_pipeline(
-            scene,
-            &[
-                global_descriptor_set_layout,
-                offsets_descriptor_set_layout,
-                brdf_params_descriptor_set_layout,
-            ],
-        )?;
+        (self.pipeline_layout, self.pipeline, shader_group_count) =
+            self.create_pipeline(scene, &[descriptor_set_layout])?;
 
         let sbt_buffer: AllocatedBuffer;
         (
@@ -1022,26 +951,8 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         ) = self.create_sbt(shader_group_count, allocator)?;
         self.sbt_buffer = Some(sbt_buffer);
 
-        (self.global_descriptor_pool, self.global_descriptor_set) = self
-            .create_descriptor_pool_and_set(
-                global_descriptor_set_layout,
-                &global_descriptor_sizes,
-                global_bindless_count,
-            )?;
-        (self.offsets_descriptor_pool, self.offsets_descriptor_set) = self
-            .create_descriptor_pool_and_set(
-                offsets_descriptor_set_layout,
-                &offsets_descriptor_sizes,
-                offsets_bindless_count,
-            )?;
-        (
-            self.brdf_params_descriptor_pool,
-            self.brdf_params_descriptor_set,
-        ) = self.create_descriptor_pool_and_set(
-            brdf_params_descriptor_set_layout,
-            &brdf_params_descriptor_sizes,
-            brdf_params_bindless_count,
-        )?;
+        (self.descriptor_pool, self.descriptor_set) =
+            self.create_descriptor_pool_and_set(descriptor_set_layout, &descriptor_sizes)?;
 
         let vertex_normal_data: Vec<f32> = scene
             .meshes
@@ -1070,7 +981,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             sampler: vk::Sampler::null(),
         };
         let image_write = vk::WriteDescriptorSet {
-            dst_set: self.global_descriptor_set,
+            dst_set: self.descriptor_set,
             dst_binding: 0,
             dst_array_element: 0,
             descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
@@ -1085,7 +996,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             ..Default::default()
         };
         let accel_write = vk::WriteDescriptorSet {
-            dst_set: self.global_descriptor_set,
+            dst_set: self.descriptor_set,
             dst_binding: 1,
             dst_array_element: 0,
             descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
@@ -1100,7 +1011,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             offset: 0,
         };
         let vertex_normal_buffer_write = vk::WriteDescriptorSet {
-            dst_set: self.global_descriptor_set,
+            dst_set: self.descriptor_set,
             dst_binding: 2,
             dst_array_element: 0,
             descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
@@ -1146,10 +1057,6 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
                 vk::PhysicalDeviceFeatures {},
                 vk::PhysicalDeviceVulkan12Features {
                     buffer_device_address,
-                    descriptor_indexing,
-                    descriptor_binding_partially_bound,
-                    descriptor_binding_variable_descriptor_count,
-                    runtime_descriptor_array,
                 },
                 vk::PhysicalDeviceAccelerationStructureFeaturesKHR {
                     acceleration_structure,
