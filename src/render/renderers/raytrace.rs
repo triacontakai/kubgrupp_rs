@@ -822,8 +822,8 @@ impl RaytraceRenderer {
                 .begin_command_buffer(command_buffer, &command_buffer_begin_info)?;
             self.device.cmd_pipeline_barrier(
                 command_buffer,
-                vk::PipelineStageFlags::ALL_COMMANDS,
-                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
                 vk::DependencyFlags::empty(),
                 &[],
                 &[],
@@ -902,7 +902,8 @@ impl RaytraceRenderer {
 
                 self.device.cmd_pipeline_barrier(
                     command_buffer,
-                    vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR,
+                    vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR
+                        | vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::DependencyFlags::empty(),
                     &[vk::MemoryBarrier {
