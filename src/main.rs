@@ -25,6 +25,7 @@ use scene::Scene;
 use utils::{query_queue_families, QueueFamilyInfo};
 use window::WindowData;
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -327,7 +328,9 @@ where
             let surface_loader = khr::surface::Instance::new(&self.vk_lib, &self.instance);
 
             let window = event_loop
-                .create_window(WindowAttributes::default())
+                .create_window(
+                    WindowAttributes::default().with_inner_size(PhysicalSize::new(800, 800)),
+                )
                 .unwrap();
             let display_handle = window.display_handle().unwrap();
             let window_handle = window.window_handle().unwrap();
