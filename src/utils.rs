@@ -76,6 +76,7 @@ impl AllocatedBuffer {
             let buffer = device.create_buffer(&buffer_info, None)?;
 
             let memory_req = device.get_buffer_memory_requirements(buffer);
+            println!("{}", memory_req.alignment);
 
             let allocation = allocator.allocate(&AllocationCreateDesc {
                 name: "buffer",

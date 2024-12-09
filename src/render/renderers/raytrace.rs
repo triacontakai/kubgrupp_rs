@@ -118,6 +118,7 @@ impl RaytraceRenderer {
             }?;
             build_info.dst_acceleration_structure = accel_struct;
 
+            println!("scratch buffer!!!");
             let scratch_buffer = AllocatedBuffer::new(
                 &self.device,
                 allocator,
