@@ -50,6 +50,8 @@ pub struct Camera {
 
     // matrix from camera to clip space
     pub perspective: Mat4,
+
+    fov: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -99,7 +101,7 @@ struct Shaders {
 #[derive(Debug)]
 pub enum MeshSceneUpdate {
     NewView(Mat4),
-    NewSize((u32, u32)),
+    NewSize((u32, u32, Mat4)),
 }
 
 impl Scene for MeshScene {
@@ -169,6 +171,18 @@ impl ShaderType {
 }
 
 impl MeshScene {
+    pub fn on_resize(&mut self, width: u32, height: u32) -> Mat4 {
+        let fov_radians = self.camera.fov * PI / 180f32;
+
+        let mut perspective =
+            Mat4::perspective_lh(fov_radians, width as f32 / height as f32, 0.1f32, 1000f32);
+        perspective.y_axis = -perspective.y_axis;
+
+        self.camera.perspective = perspective;
+
+        perspective
+    }
+
     pub fn load_from(mut reader: impl Read) -> Result<Self> {
         let mut toml_conf = String::new();
         reader.read_to_string(&mut toml_conf)?;
@@ -950,7 +964,11 @@ impl MeshScene {
         };
         let view = Self::parse_transform(view_str)?;
 
-        Ok(Camera { view, perspective })
+        Ok(Camera {
+            view,
+            perspective,
+            fov,
+        })
     }
 }
 

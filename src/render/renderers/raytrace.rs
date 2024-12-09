@@ -41,6 +41,7 @@ pub struct RaytraceRenderer {
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
     storage_image: vk::Image,
+    storage_image_size: (u32, u32),
     storage_image_view: vk::ImageView,
     storage_image_allocation: Allocation,
     vertex_normal_buffer: Option<AllocatedBuffer>,
@@ -867,7 +868,7 @@ impl RaytraceRenderer {
         &self,
         command_buffer: vk::CommandBuffer,
         target_image: vk::Image,
-        (width, height): (u32, u32),
+        (target_width, target_height): (u32, u32),
     ) -> anyhow::Result<()> {
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::default();
 
@@ -906,8 +907,8 @@ impl RaytraceRenderer {
                 &self.miss_region,
                 &self.hit_region,
                 &self.callable_region,
-                width,
-                height,
+                self.storage_image_size.0,
+                self.storage_image_size.1,
                 1,
             );
 
@@ -955,8 +956,8 @@ impl RaytraceRenderer {
                     src_offsets: [
                         vk::Offset3D { x: 0, y: 0, z: 0 },
                         vk::Offset3D {
-                            x: width as i32,
-                            y: height as i32,
+                            x: self.storage_image_size.0 as i32,
+                            y: self.storage_image_size.1 as i32,
                             z: 1,
                         },
                     ],
@@ -969,8 +970,8 @@ impl RaytraceRenderer {
                     dst_offsets: [
                         vk::Offset3D { x: 0, y: 0, z: 0 },
                         vk::Offset3D {
-                            x: width as i32,
-                            y: height as i32,
+                            x: target_width as i32,
+                            y: target_height as i32,
                             z: 1,
                         },
                     ],
@@ -1047,6 +1048,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         };
         let compute_queue = unsafe { device.get_device_queue(compute_queue_index, 0) };
 
+        let (image_width, image_height) = target.get_size();
         let mut out = RaytraceRenderer {
             device: device.clone(),
             accel_struct_device,
@@ -1072,6 +1074,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             descriptor_pool: Default::default(),
             descriptor_set: Default::default(),
             storage_image: Default::default(),
+            storage_image_size: (image_width, image_height),
             storage_image_view: Default::default(),
             storage_image_allocation: Default::default(),
             vertex_normal_buffer: Default::default(),
@@ -1082,13 +1085,11 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             camera_data: [0; 128],
         };
 
-        let (width, height) = target.get_size();
-
         (
             out.storage_image,
             out.storage_image_view,
             out.storage_image_allocation,
-        ) = out.create_storage_image(width, height, allocator)?;
+        ) = out.create_storage_image(image_width, image_height, allocator)?;
 
         Ok(out)
     }
@@ -1291,7 +1292,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
                     let view_bytes: &[u8] = bytemuck::cast_slice(&view_inverse_cols);
                     self.camera_data[0..64].copy_from_slice(&view_bytes);
                 }
-                MeshSceneUpdate::NewSize((width, height)) => unsafe {
+                MeshSceneUpdate::NewSize((width, height, projection)) => unsafe {
                     self.device.device_wait_idle()?;
                     self.device
                         .destroy_image_view(self.storage_image_view, None);
@@ -1319,6 +1320,10 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
                     };
 
                     self.device.update_descriptor_sets(&[image_write], &[]);
+
+                    let projection_inverse_cols = projection.inverse().to_cols_array();
+                    let projection_bytes: &[u8] = bytemuck::cast_slice(&projection_inverse_cols);
+                    self.camera_data[64..128].copy_from_slice(&projection_bytes);
                 },
             }
         }

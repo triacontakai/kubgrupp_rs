@@ -548,7 +548,8 @@ where
                 };
 
                 if let Some((w, h)) = self.pending_resize {
-                    updates.push(MeshSceneUpdate::NewSize((w, h)));
+                    let proj = self.scene.on_resize(w, h);
+                    updates.push(MeshSceneUpdate::NewSize((w, h, proj)));
                 }
 
                 self.renderer
