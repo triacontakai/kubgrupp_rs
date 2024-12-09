@@ -36,25 +36,34 @@ name = "albedo"
 type = "vec3"
 
 [[brdf]]
-name = "normals"
-chit_shader = "normals.rchit"
-field = []
+name = "flattuah"
+chit_shader = "flattuah.rchit"
+[[brdf.field]]
+name = "_erm"
+type = "uint"
+[[brdf.field]]
+name = "albedo"
+type = "vec3"
+[[brdf.field]]
+name = "_bad2"
+type = "vec2"
+[[brdf.field]]
+name = "_bad3"
+type = "uint"
 
 [[object]]
 mesh = "cube.obj"
 transform = '''
 translate 0 -2 0
 '''
-brdf = {name = "normals", fields = []}
-#brdf = {name = "flat", fields = [[0.2, 0.2, 0.8]]}
+brdf = {name = "flattuah", fields = [727, [0.2, 0.2, 0.8], [1, 1], 69]}
 
 [[object]]
 mesh = "cube.obj"
 transform = '''
-translate -.5 -.5 0
+identity
 '''
-brdf = {name = "normals", fields = []}
-#brdf = {name = "flat", fields = [[0.2, 0.8, 0.2]]}
+brdf = {name = "flat", fields = [[0.2, 0.8, 0.2]]}
 
 [[object]]
 mesh = "cube.obj"
@@ -62,13 +71,4 @@ transform = '''
 rotate 45 0 0 1
 translate 1 1 0
 '''
-brdf = {name = "normals", fields = []}
-#brdf = {name = "flat", fields = [[0.8, 0.2, 0.2]]}
-
-[[object]]
-mesh = "sphere.obj"
-transform = '''
-scale .5 .5 .5
-translate 3 -1 .5
-'''
-brdf = {name = "normals", fields = []}
+brdf = {name = "flat", fields = [[0.8, 0.2, 0.2]]}

@@ -493,19 +493,20 @@ where
                     PhysicalKey::Code(KeyCode::Space) => {
                         self.space_down = input_event.state.is_pressed()
                     }
-                    _ => ()
+                    _ => (),
                 }
                 match input_event.key_without_modifiers().as_ref() {
                     Key::Character("w") => {
                         self.position += self.direction * 0.05f32;
                         self.view_updated = true;
                     }
-                    _ => ()
+                    _ => (),
                 }
             }
             WindowEvent::RedrawRequested => {
                 const SPEED: f32 = 0.005f32;
-                let horiz_dir: Vec3 = Vec3::new(-self.direction.y, self.direction.x, 0f32).normalize();
+                let horiz_dir: Vec3 =
+                    Vec3::new(-self.direction.y, self.direction.x, 0f32).normalize();
                 let vert_dir: Vec3 = self.direction.cross(horiz_dir);
                 if self.w_down {
                     self.position += SPEED * self.direction;

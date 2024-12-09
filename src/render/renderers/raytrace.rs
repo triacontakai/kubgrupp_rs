@@ -2,6 +2,7 @@ use std::{ffi::c_char, sync::LazyLock, u64};
 
 use anyhow::anyhow;
 use ash::{khr, vk, Device, Entry, Instance};
+use glam::Vec3;
 use gpu_allocator::{vulkan::*, MemoryLocation};
 use tobj::Model;
 
@@ -869,7 +870,8 @@ impl RaytraceRenderer {
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::default();
 
         unsafe {
-            self.device.reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
+            self.device
+                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
 
             self.device
                 .begin_command_buffer(command_buffer, &command_buffer_begin_info)?;
@@ -1135,13 +1137,16 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             .meshes
             .iter()
             .flat_map(|x| {
-                x.mesh
-                    .positions
-                    .chunks_exact(3)
-                    .zip(x.mesh.normals.chunks_exact(3))
-                    .flat_map(|(p, n)| p.iter().chain(n.iter()))
+                let mesh = &x.mesh;
+                mesh.indices.iter().flat_map(|i| {
+                    let i = *i as usize;
+                    let pos = &mesh.positions[3 * i..3 * i + 3];
+                    let normal = &mesh.normals[3 * i..3 * i + 3];
+
+                    pos.iter().chain(normal)
+                })
             })
-            .map(|&x| x)
+            .map(|x| *x)
             .collect();
 
         self.vertex_normal_buffer = Some(unsafe {
@@ -1289,7 +1294,11 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             self.command_buffers.push(self.create_command_buffer()?);
         }
 
-        self.record_command_buffer(self.command_buffers[image_index as usize], image, target.get_size())?;
+        self.record_command_buffer(
+            self.command_buffers[image_index as usize],
+            image,
+            target.get_size(),
+        )?;
 
         let (image_semaphore, render_semaphore) = target.get_current_semaphores();
         let wait_stage = vk::PipelineStageFlags::TRANSFER;

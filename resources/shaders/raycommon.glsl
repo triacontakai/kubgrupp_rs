@@ -3,3 +3,4 @@ struct RayPayload {
     vec3 ray_d;
     vec3 rad;
 };
+

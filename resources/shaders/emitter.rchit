@@ -7,27 +7,13 @@
 #extension GL_EXT_debug_printf : enable
 
 #include "raycommon.glsl"
+#include "hitcommon.glsl"
 
 layout(location = 0) rayPayloadInEXT RayPayload ray_info;
-
-struct BrdfParams {
-    vec3 color;
-};
-
-struct Light {
-    uint type;
-    vec3 color;
-    vec3 position;
-    vec3 vertices[3];
-};
 
 layout(scalar, set = 0, binding = 3) readonly buffer Lights {
     Light lights[];
 } lights;
-
-layout(scalar, set = 0, binding = 5) readonly buffer Fields {
-    BrdfParams params[];
-} instance_info;
 
 void main() {
     ray_info.rad = lights.lights[nonuniformEXT(gl_InstanceCustomIndexEXT)].color;
