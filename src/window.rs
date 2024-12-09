@@ -128,6 +128,10 @@ impl WindowData {
         Ok(self.current_image)
     }
 
+    pub fn request_redraw(&self) {
+        self.window.request_redraw();
+    }
+
     pub fn get_size(&self) -> (u32, u32) {
         (self.image_extent.width, self.image_extent.height)
     }

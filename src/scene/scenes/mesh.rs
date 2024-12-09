@@ -1,5 +1,13 @@
 use std::{
-    alloc::{self, Layout}, collections::HashMap, f32::consts::PI, ffi::{CStr, CString}, fs::File, io::Read, iter::Peekable, path::Path, ptr::NonNull
+    alloc::{self, Layout},
+    collections::HashMap,
+    f32::consts::PI,
+    ffi::{CStr, CString},
+    fs::File,
+    io::Read,
+    iter::Peekable,
+    path::Path,
+    ptr::NonNull,
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -10,7 +18,10 @@ use log::warn;
 use tobj::Model;
 use toml::{map::Map, Table, Value};
 
-use crate::scene::{type_lexer::{Token, TokenIter}, Scene};
+use crate::scene::{
+    type_lexer::{Token, TokenIter},
+    Scene,
+};
 
 const MESHES_DIR: &str = "resources/meshes";
 const SPIRV_DIR: &str = "resources/shaders/spv/";
@@ -40,14 +51,8 @@ pub struct Camera {
 
 #[derive(Debug, Clone)]
 pub enum Light {
-    Point {
-        color: Vec3,
-        position: Vec3,
-    },
-    Triangle {
-        color: Vec3,
-        vertices: [Vec3; 3],
-    },
+    Point { color: Vec3, position: Vec3 },
+    Triangle { color: Vec3, vertices: [Vec3; 3] },
 }
 
 #[derive(Debug, Clone)]
@@ -129,7 +134,7 @@ impl Shader {
 
                 let module = unsafe { device.create_shader_module(&create_info, None) }?;
                 Ok(Shader::Compiled(name, module))
-            },
+            }
             x @ Shader::Compiled(..) => Ok(x),
         }
     }
@@ -182,7 +187,8 @@ impl MeshScene {
 
         // load objects before lights
         // this is to give them the correct brdf_params_index
-        let mut objects = Self::parse_toml_objects(&conf, &mesh_map, &meshes, &shaders.rchit, &shader_type_map)?;
+        let mut objects =
+            Self::parse_toml_objects(&conf, &mesh_map, &meshes, &shaders.rchit, &shader_type_map)?;
         let lights = Self::parse_toml_lights(&conf, &mesh_map, &meshes, &mut objects)?;
 
         Ok(Self {
@@ -197,7 +203,8 @@ impl MeshScene {
     }
 
     fn get_field<'a, 'b>(conf: &'a Table, field: &'b str) -> Result<&'a Value> {
-        conf.get(field).ok_or(anyhow!("field {} not provided", field))
+        conf.get(field)
+            .ok_or(anyhow!("field {} not provided", field))
     }
 
     fn get_array<'a, 'b>(conf: &'a Table, field: &'b str) -> Result<&'a Vec<Value>> {
@@ -226,17 +233,20 @@ impl MeshScene {
         mesh_map: &HashMap<String, u32>,
         meshes: &[Model],
         shaders: &Vec<Shader>,
-        type_map: &HashMap<String, Vec<ShaderType>>
+        type_map: &HashMap<String, Vec<ShaderType>>,
     ) -> Result<Vec<Object>> {
         // get primitive start offsets of meshes
         let mut offset = 0;
-        let start_offsets: Vec<_> = meshes.iter().map(|m| {
-            let num_vertices = m.mesh.indices.len();
-            let this_offset = offset;
-            offset += num_vertices;
+        let start_offsets: Vec<_> = meshes
+            .iter()
+            .map(|m| {
+                let num_vertices = m.mesh.indices.len();
+                let this_offset = offset;
+                offset += num_vertices;
 
-            this_offset
-        }).collect();
+                this_offset
+            })
+            .collect();
 
         let mut objects = Vec::new();
 
@@ -252,10 +262,16 @@ impl MeshScene {
             let brdf_info = Self::get_table(object, "brdf")?;
             let brdf_name = Self::get_string(brdf_info, "name")?;
             let brdf_fields = Self::get_array(brdf_info, "fields")?;
-            let field_types = type_map.get(brdf_name).ok_or(anyhow!("undefined brdf name: {}", brdf_name))?;
+            let field_types = type_map
+                .get(brdf_name)
+                .ok_or(anyhow!("undefined brdf name: {}", brdf_name))?;
 
             if field_types.len() != brdf_fields.len() {
-                bail!("expected number of fields ({}) doesn't match up with provided fields ({})", field_types.len(), brdf_fields.len());
+                bail!(
+                    "expected number of fields ({}) doesn't match up with provided fields ({})",
+                    field_types.len(),
+                    brdf_fields.len()
+                );
             }
 
             let mut datas = Vec::new();
@@ -267,7 +283,10 @@ impl MeshScene {
             }
 
             let brdf_name = CString::new(brdf_name.clone())?;
-            let brdf_i = shaders.iter().position(|x| x.name() == &brdf_name[..]).ok_or(anyhow!("undefined brdf: {:?}", brdf_name))?;
+            let brdf_i = shaders
+                .iter()
+                .position(|x| x.name() == &brdf_name[..])
+                .ok_or(anyhow!("undefined brdf: {:?}", brdf_name))?;
             let mesh_i = *mesh_map.get(mesh_name).ok_or(anyhow!("asd"))? as usize;
             let vertex_index = start_offsets[mesh_i] as u32;
 
@@ -292,7 +311,7 @@ impl MeshScene {
             ShaderType::Float => {
                 let float = Self::parse_toml_f32(field)?;
                 Ok(float.to_le_bytes().to_vec())
-            },
+            }
             ShaderType::Vec3 => {
                 let Value::Array(array) = field else {
                     bail!("vec3 type requires array of length 3");
@@ -308,7 +327,7 @@ impl MeshScene {
 
                 let bytes: [u8; 12] = bytemuck::cast(Vec3::new(x, y, z));
                 Ok(bytes.to_vec())
-            },
+            }
             ShaderType::Vec2 => {
                 let Value::Array(array) = field else {
                     bail!("vec2 type requires array of length 2");
@@ -323,7 +342,7 @@ impl MeshScene {
 
                 let bytes: [u8; 8] = bytemuck::cast(Vec2::new(x, y));
                 Ok(bytes.to_vec())
-            },
+            }
             ShaderType::UInt => {
                 let &Value::Integer(num) = field else {
                     bail!("uint type requires integer")
@@ -331,7 +350,7 @@ impl MeshScene {
 
                 let num: u32 = num.try_into()?;
                 Ok(num.to_le_bytes().to_vec())
-            },
+            }
             ShaderType::Int => {
                 let &Value::Integer(num) = field else {
                     bail!("int type requires integer")
@@ -339,7 +358,7 @@ impl MeshScene {
 
                 let num: i32 = num.try_into()?;
                 Ok(num.to_le_bytes().to_vec())
-            },
+            }
             ShaderType::Array(shader_type, size) => {
                 let Value::Array(array) = field else {
                     bail!("array type requires toml array");
@@ -355,7 +374,7 @@ impl MeshScene {
                 }
 
                 Ok(full_data)
-            },
+            }
         }
     }
 
@@ -367,7 +386,10 @@ impl MeshScene {
 
         let raygen = Self::parse_toml_shader(Self::get_field(global_shaders, "raygen")?, "raygen")?;
         let miss = Self::parse_toml_shader(Self::get_field(global_shaders, "miss")?, "miss")?;
-        let emitter_rchit = Self::parse_toml_shader(Self::get_field(global_shaders, "emitter_hit")?, "emitter_hit")?;
+        let emitter_rchit = Self::parse_toml_shader(
+            Self::get_field(global_shaders, "emitter_hit")?,
+            "emitter_hit",
+        )?;
 
         // parse shaders in brdfs
         // these also include types
@@ -401,12 +423,15 @@ impl MeshScene {
             chit_shaders.push(chit_shader);
         }
 
-        Ok((Shaders {
-            raygen,
-            miss,
-            emitter_rchit,
-            rchit: chit_shaders,
-        }, type_map))
+        Ok((
+            Shaders {
+                raygen,
+                miss,
+                emitter_rchit,
+                rchit: chit_shaders,
+            },
+            type_map,
+        ))
     }
 
     fn parse_toml_shader(name: &Value, shader_name: &str) -> Result<Shader> {
@@ -496,11 +521,15 @@ impl MeshScene {
             }
 
             let mesh_path = Path::new(MESHES_DIR).join(Self::get_string(obj, "mesh")?);
-            let (mesh, _)  = tobj::load_obj(mesh_path, &tobj::GPU_LOAD_OPTIONS)?;
+            let (mesh, _) = tobj::load_obj(mesh_path, &tobj::GPU_LOAD_OPTIONS)?;
 
             // only take the first model
             if mesh.len() > 1 {
-                warn!("mesh file has {} meshes - only using first ({})", mesh.len(), mesh[0].name);
+                warn!(
+                    "mesh file has {} meshes - only using first ({})",
+                    mesh.len(),
+                    mesh[0].name
+                );
             }
 
             if let Some(mesh) = mesh.into_iter().next() {
@@ -512,8 +541,16 @@ impl MeshScene {
         Ok((meshes, mesh_map))
     }
 
-    fn parse_toml_lights(conf: &Table, mesh_map: &HashMap<String, u32>, meshes: &[Model], objects: &mut Vec<Object>) -> Result<Vec<Light>> {
-        let Value::Array(light_confs) = conf.get("light").ok_or(anyhow!("no lights field provided"))? else {
+    fn parse_toml_lights(
+        conf: &Table,
+        mesh_map: &HashMap<String, u32>,
+        meshes: &[Model],
+        objects: &mut Vec<Object>,
+    ) -> Result<Vec<Light>> {
+        let Value::Array(light_confs) = conf
+            .get("light")
+            .ok_or(anyhow!("no lights field provided"))?
+        else {
             bail!("lights field must be an array of lights");
         };
 
@@ -523,22 +560,40 @@ impl MeshScene {
             let Value::Table(light_conf) = light_conf else {
                 bail!("light must be a table");
             };
-            let Value::String(light_type) = light_conf.get("type").ok_or(anyhow!("no type field found for light"))? else {
+            let Value::String(light_type) = light_conf
+                .get("type")
+                .ok_or(anyhow!("no type field found for light"))?
+            else {
                 bail!("light type must be a string");
             };
 
-            let color = Self::parse_toml_vec3(light_conf.get("color").ok_or(anyhow!("no color field found for light"))?)?;
+            let color = Self::parse_toml_vec3(
+                light_conf
+                    .get("color")
+                    .ok_or(anyhow!("no color field found for light"))?,
+            )?;
 
             match light_type.as_str() {
                 "point" => {
-                    let position = Self::parse_toml_vec3(light_conf.get("position").ok_or(anyhow!("no top_left field found for light"))?)?;
-                    lights.push(Light::Point { color, position, });
-                },
+                    let position = Self::parse_toml_vec3(
+                        light_conf
+                            .get("position")
+                            .ok_or(anyhow!("no top_left field found for light"))?,
+                    )?;
+                    lights.push(Light::Point { color, position });
+                }
                 "area" => {
-                    let transform = Self::parse_toml_transform(light_conf.get("transform").ok_or(anyhow!("no transform field provided"))?)?;
+                    let transform = Self::parse_toml_transform(
+                        light_conf
+                            .get("transform")
+                            .ok_or(anyhow!("no transform field provided"))?,
+                    )?;
 
                     let mesh_name = Self::get_string(&light_conf, "mesh")?;
-                    let mesh_i = *mesh_map.get(mesh_name).ok_or(anyhow!("no such mesh: {}", mesh_name))? as usize;
+                    let mesh_i = *mesh_map
+                        .get(mesh_name)
+                        .ok_or(anyhow!("no such mesh: {}", mesh_name))?
+                        as usize;
                     let mesh = &meshes[mesh_i].mesh;
 
                     let start_idx = lights.len();
@@ -549,12 +604,20 @@ impl MeshScene {
                         bail!("obj face list was not a multiple of 3 in length")
                     }
                     for triangle in triangles {
-                        let vertices: Vec<_> = triangle.iter().map(|&i| {
-                            let pos = Vec4::from((Vec3::from_slice(&mesh.positions[3 * i as usize..3 * i as usize + 3]), 1.0));
-                            let v = transform * pos;
+                        let vertices: Vec<_> = triangle
+                            .iter()
+                            .map(|&i| {
+                                let pos = Vec4::from((
+                                    Vec3::from_slice(
+                                        &mesh.positions[3 * i as usize..3 * i as usize + 3],
+                                    ),
+                                    1.0,
+                                ));
+                                let v = transform * pos;
 
-                            Vec3::new(v.x, v.y, v.z)
-                        }).collect();
+                                Vec3::new(v.x, v.y, v.z)
+                            })
+                            .collect();
 
                         lights.push(Light::Triangle {
                             color,
@@ -596,9 +659,21 @@ impl MeshScene {
 
         let mut values = values.iter();
 
-        let x = Self::parse_toml_f32(values.next().ok_or(anyhow!("vec3 requires x y z - x not provided"))?)?;
-        let y = Self::parse_toml_f32(values.next().ok_or(anyhow!("vec3 requires x y z - y not provided"))?)?;
-        let z = Self::parse_toml_f32(values.next().ok_or(anyhow!("vec3 requires x y z - xznot provided"))?)?;
+        let x = Self::parse_toml_f32(
+            values
+                .next()
+                .ok_or(anyhow!("vec3 requires x y z - x not provided"))?,
+        )?;
+        let y = Self::parse_toml_f32(
+            values
+                .next()
+                .ok_or(anyhow!("vec3 requires x y z - y not provided"))?,
+        )?;
+        let z = Self::parse_toml_f32(
+            values
+                .next()
+                .ok_or(anyhow!("vec3 requires x y z - xznot provided"))?,
+        )?;
 
         if values.next().is_some() {
             bail!("vec3 requires 3 arguments x y z, but saw extra");
@@ -720,12 +795,16 @@ impl MeshScene {
     }
 
     fn parse_type<'a>(tokens: &mut Peekable<TokenIter<'a>>) -> Result<ShaderType> {
-        let lookahead = tokens.peek().ok_or(anyhow!("incomplete type - no tokens remaining"))?;
+        let lookahead = tokens
+            .peek()
+            .ok_or(anyhow!("incomplete type - no tokens remaining"))?;
         let parsed_type = match lookahead {
             Token::LSqBracket => Self::parse_array(tokens)?,
             Token::Semicolon => todo!(),
             Token::Typename(_) => Self::parse_simple_type(tokens)?,
-            Token::Integer(int) => bail!("type should never start with integer token, but started with one: {int}"),
+            Token::Integer(int) => {
+                bail!("type should never start with integer token, but started with one: {int}")
+            }
             Token::RSqBracket => bail!("type should never start with right square bracket"),
             Token::LexerError(_) => {
                 let Token::LexerError(error) = tokens.next().unwrap() else {
@@ -733,20 +812,26 @@ impl MeshScene {
                 };
 
                 return Err(error);
-            },
+            }
         };
 
         Ok(parsed_type)
     }
 
     fn parse_array<'a>(tokens: &mut Peekable<TokenIter<'a>>) -> Result<ShaderType> {
-        if !matches!(tokens.next().ok_or(anyhow!("no next token"))?, Token::LSqBracket) {
+        if !matches!(
+            tokens.next().ok_or(anyhow!("no next token"))?,
+            Token::LSqBracket
+        ) {
             bail!("no [ found for start of array");
         }
 
         let parsed_type = Self::parse_type(tokens)?;
 
-        if !matches!(tokens.next().ok_or(anyhow!("no next token"))?, Token::Semicolon) {
+        if !matches!(
+            tokens.next().ok_or(anyhow!("no next token"))?,
+            Token::Semicolon
+        ) {
             bail!("no semicolon found after parsing array type")
         }
 
@@ -754,7 +839,10 @@ impl MeshScene {
             bail!("array size should be a constant unsigned integer")
         };
 
-        if !matches!(tokens.next().ok_or(anyhow!("no next token"))?, Token::RSqBracket) {
+        if !matches!(
+            tokens.next().ok_or(anyhow!("no next token"))?,
+            Token::RSqBracket
+        ) {
             bail!("no ] found for end of array")
         }
 
@@ -772,7 +860,7 @@ impl MeshScene {
             "uint" => ShaderType::UInt,
             "vec3" => ShaderType::Vec3,
             "vec2" => ShaderType::Vec2,
-            s => bail!("invalid typename: {s}")
+            s => bail!("invalid typename: {s}"),
         })
     }
 
@@ -795,7 +883,8 @@ impl MeshScene {
 
         // use 1 as default aspect ratio
         // ideally this will never actually be used since it will be updated immediately after window creation
-        let perspective = Mat4::perspective_lh(fov_radians, 1f32, 0f32, 1000f32);
+        let mut perspective = Mat4::perspective_lh(fov_radians, 1f32, 0.1f32, 1000f32);
+        perspective.y_axis = -perspective.y_axis;
 
         let Value::String(view_str) = camera_table
             .get("view")
@@ -811,7 +900,7 @@ impl MeshScene {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::File, io::{Read}};
+    use std::{fs::File, io::Read};
 
     use glam::{Vec3, Vec4};
     use toml::{Table, Value};
@@ -836,21 +925,25 @@ mod tests {
         let eye = Vec3::new(3f32, 2f32, 1f32);
         let dist = eye.dot(eye).sqrt();
 
-        assert!((point_cam.z - dist) < 2e-4, "point_cam.z: {}, ||eye - origin||: {}", point_cam.z, dist);
+        assert!(
+            (point_cam.z - dist) < 2e-4,
+            "point_cam.z: {}, ||eye - origin||: {}",
+            point_cam.z,
+            dist
+        );
     }
 
     #[test]
     fn parse_type_complicated() {
         let parsed_type = MeshScene::parse_type_str("[[vec3; 3]; 1]").expect("failed to parse");
 
-        assert_eq!(parsed_type, ShaderType::Array(
-            Box::new(
-                ShaderType::Array(
-                    Box::new(ShaderType::Vec3),
-                    3
-                )),
-            1
-        ))
+        assert_eq!(
+            parsed_type,
+            ShaderType::Array(
+                Box::new(ShaderType::Array(Box::new(ShaderType::Vec3), 3)),
+                1
+            )
+        )
     }
 
     #[test]
@@ -875,13 +968,14 @@ mod tests {
         file.read_to_string(&mut toml_conf).unwrap();
         let conf: Table = toml_conf.parse().unwrap();
 
-        let (meshes,mesh_map) = MeshScene::parse_toml_meshes(&conf).unwrap();
+        let (meshes, mesh_map) = MeshScene::parse_toml_meshes(&conf).unwrap();
         //dbg!(meshes, mesh_map);
     }
 
     #[test]
     fn test_load_shader() {
-        let shader = MeshScene::parse_toml_shader(&Value::String("flat.rchit".to_string()), "flat").unwrap();
+        let shader =
+            MeshScene::parse_toml_shader(&Value::String("flat.rchit".to_string()), "flat").unwrap();
     }
 
     #[test]

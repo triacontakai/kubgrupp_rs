@@ -21,13 +21,13 @@ impl<'a> PartialEq for Token<'a> {
 }
 
 pub struct TokenIter<'a> {
-    remaining: &'a str
+    remaining: &'a str,
 }
 
 impl<'a> TokenIter<'a> {
     pub fn new(str: &'a str) -> Self {
         Self {
-            remaining: str.trim_start()
+            remaining: str.trim_start(),
         }
     }
 }
@@ -49,29 +49,37 @@ impl<'a> Iterator for TokenIter<'a> {
             '[' => {
                 self.remaining = &chars.as_str().trim_start();
                 Token::LSqBracket
-            },
+            }
             ']' => {
                 self.remaining = &chars.as_str().trim_start();
                 Token::RSqBracket
-            },
+            }
             ';' => {
                 self.remaining = &chars.as_str().trim_start();
                 Token::Semicolon
-            },
+            }
             c if c.is_ascii_alphabetic() => {
                 // get slice first non-alphanumeric character to get identifier name
-                let end = remaining.find(|c: char| !c.is_ascii_alphanumeric()).unwrap_or(remaining.len());
+                let end = remaining
+                    .find(|c: char| !c.is_ascii_alphanumeric())
+                    .unwrap_or(remaining.len());
                 let id = &remaining[..end];
                 self.remaining = &remaining[end..];
                 Token::Typename(id)
-            },
+            }
             c if c.is_ascii_digit() => {
-                let end = remaining.find(|c: char| !c.is_ascii_digit()).unwrap_or(remaining.len());
+                let end = remaining
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(remaining.len());
                 let num = remaining[..end].parse().unwrap();
                 self.remaining = &remaining[end..];
                 Token::Integer(num)
             }
-            x => Token::LexerError(anyhow!("invalid start of token found: {} (remaining: {:?})", x, remaining))
+            x => Token::LexerError(anyhow!(
+                "invalid start of token found: {} (remaining: {:?})",
+                x,
+                remaining
+            )),
         })
     }
 }
@@ -85,16 +93,19 @@ mod tests {
         let iter = TokenIter::new("  [[vec3;   5];1] ");
         let tokens: Vec<_> = iter.collect();
 
-        assert_eq!(&tokens[..], &[
-            Token::LSqBracket,
-            Token::LSqBracket,
-            Token::Typename("vec3"),
-            Token::Semicolon,
-            Token::Integer(5),
-            Token::RSqBracket,
-            Token::Semicolon,
-            Token::Integer(1),
-            Token::RSqBracket,
-        ]);
+        assert_eq!(
+            &tokens[..],
+            &[
+                Token::LSqBracket,
+                Token::LSqBracket,
+                Token::Typename("vec3"),
+                Token::Semicolon,
+                Token::Integer(5),
+                Token::RSqBracket,
+                Token::Semicolon,
+                Token::Integer(1),
+                Token::RSqBracket,
+            ]
+        );
     }
 }

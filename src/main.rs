@@ -440,6 +440,8 @@ where
                     .unwrap()
                     .render_to(&[], self.window.as_mut().unwrap())
                     .expect("failed to render to target");
+
+                self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),
         }

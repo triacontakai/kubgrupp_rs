@@ -1,10 +1,6 @@
 use std::ffi::c_char;
 
-use crate::{
-    features::VkFeatureGuard,
-    scene::Scene,
-    utils::QueueFamilyInfo,
-};
+use crate::{features::VkFeatureGuard, scene::Scene, utils::QueueFamilyInfo};
 use ash::{vk, Device, Entry, Instance};
 use gpu_allocator::vulkan::Allocator;
 
