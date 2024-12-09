@@ -5,7 +5,7 @@ use std::{
     ffi::{CStr, CString},
     fs::File,
     io::Read,
-    iter::Peekable,
+    iter::{self, Peekable},
     path::Path,
     ptr::NonNull,
 };
@@ -38,6 +38,9 @@ pub struct MeshScene {
     pub raygen_shader: Shader,
     pub miss_shader: Shader,
     pub hit_shaders: Vec<Shader>,
+
+    pub brdf_buf: Vec<u8>,
+    pub offset_buf: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,8 +76,6 @@ pub struct Object {
 
     // this is pretty much just the base of the mesh in the list of all vertices
     pub vertex_index: u32,
-
-    pub brdf_params_index: u32,
 }
 
 #[derive(Debug, PartialEq)]
@@ -189,6 +190,8 @@ impl MeshScene {
             Self::parse_toml_objects(&conf, &mesh_map, &meshes, &shaders.rchit, &shader_type_map)?;
         let lights = Self::parse_toml_lights(&conf, &mesh_map, &meshes, &mut objects)?;
 
+        let (brdf_buf, offset_buf) = Self::get_brdf_params_buffer_and_indices(&objects, &shaders.rchit);
+
         Ok(Self {
             camera,
             lights,
@@ -197,6 +200,8 @@ impl MeshScene {
             raygen_shader: shaders.raygen,
             miss_shader: shaders.miss,
             hit_shaders: shaders.rchit,
+            brdf_buf,
+            offset_buf,
         })
     }
 
@@ -226,8 +231,48 @@ impl MeshScene {
         }
     }
 
-    //pub fn get_brdf_params_buffer(&self, storage_buffer_align: u32) -> Vec<u8> {
-    //}
+    fn get_brdf_params_buffer_and_indices(objects: &[Object], hit_shaders: &[Shader]) -> (Vec<u8>, Vec<u32>) {
+
+        // create vecs for the array of each brdf
+        let mut arrays: Vec<Vec<u8>> = vec![Vec::new(); hit_shaders.len()];
+        let mut param_sizes = vec![0usize; arrays.len()];
+        for object in objects {
+            let brdf_i = object.brdf_i;
+            arrays[brdf_i].extend_from_slice(&object.brdf_params);
+            param_sizes[brdf_i] = object.brdf_params.len();
+        }
+
+        // concatenate arrays
+        // we have to account for the size of each individual parameter struct when doing this
+        let mut data = Vec::new();
+        let mut indices = Vec::new();
+        for (array, param_size) in arrays.iter().zip(param_sizes) {
+            let current_size = data.len();
+            let padding = if current_size % param_size != 0 {
+                param_size - (current_size % param_size)
+            } else {
+                0
+            };
+
+            data.extend(iter::repeat(0).take(padding));
+            assert!(data.len() % param_size == 0);
+
+            let start_index = data.len() / param_size;
+            indices.push(start_index);
+
+            data.extend_from_slice(array);
+        }
+
+        // create offset buffer
+        let mut offsets = Vec::new();
+        for object in objects {
+            let index = &mut indices[object.brdf_i];
+            offsets.push(*index as u32);
+            *index += 1;
+        }
+
+        (data, offsets)
+    }
 
     //pub fn get_offsets_buffer(&self, )
 
