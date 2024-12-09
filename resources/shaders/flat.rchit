@@ -21,5 +21,5 @@ layout(scalar, set = 0, binding = 6) readonly buffer Fields {
 
 void main() {
     debugPrintfEXT("flat hit");
-    ray_info.rad = vec3(0.0, 0.0, 1.0);//instance_info.params[nonuniformEXT(gl_InstanceID)].albedo;
+    ray_info.rad = instance_info.params[nonuniformEXT(gl_InstanceID)].albedo;
 }

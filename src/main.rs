@@ -28,6 +28,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::{WindowAttributes, WindowId};
 
@@ -329,7 +330,10 @@ where
 
             let window = event_loop
                 .create_window(
-                    WindowAttributes::default().with_inner_size(PhysicalSize::new(800, 800)),
+                    WindowAttributes::default()
+                        .with_inner_size(PhysicalSize::new(800, 800))
+                        .with_title("kubgrupp")
+                        .with_name("kubgrupp", ""),
                 )
                 .unwrap();
             let display_handle = window.display_handle().unwrap();
