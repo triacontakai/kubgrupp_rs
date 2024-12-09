@@ -28,5 +28,10 @@ void main() {
         a.normal * full_bary_coord.x
         + b.normal * full_bary_coord.y
         + c.normal * full_bary_coord.z;
-    ray_info.rad = abs(interp_normal);
+
+    // transform normal to world coordinates
+    // no need to renormalize since world transform should just be
+    // translation + rotation
+    vec3 final_normal = normalize(gl_ObjectToWorldEXT * vec4(interp_normal, 0));
+    ray_info.rad = abs(final_normal);
 }
