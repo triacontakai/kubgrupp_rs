@@ -9,7 +9,7 @@ use crate::{
     features::{vk_features, VkFeatureGuard, VkFeatures},
     render::Renderer,
     scene::{
-        scenes::mesh::{Light, MeshScene, Object},
+        scenes::mesh::{Light, MeshScene, MeshSceneUpdate, Object},
         Scene,
     },
     utils::{align_up, AllocatedBuffer, QueueFamilyInfo},
@@ -849,162 +849,159 @@ impl RaytraceRenderer {
         Ok((image, image_view, image_allocation))
     }
 
-    fn create_command_buffer(
+    fn create_command_buffer(&self) -> anyhow::Result<vk::CommandBuffer> {
+        let allocate_info = vk::CommandBufferAllocateInfo {
+            command_buffer_count: 1,
+            command_pool: self.command_pool,
+            level: vk::CommandBufferLevel::PRIMARY,
+            ..Default::default()
+        };
+
+        Ok(unsafe { self.device.allocate_command_buffers(&allocate_info)?[0] })
+    }
+
+    fn record_command_buffer(
         &self,
-        target_images: &[vk::Image],
+        command_buffer: vk::CommandBuffer,
+        target_image: vk::Image,
         (width, height): (u32, u32),
-    ) -> anyhow::Result<Vec<vk::CommandBuffer>> {
-        let mut command_buffers = Vec::new();
-        for target_image in target_images {
-            let command_buffer = {
-                let allocate_info = vk::CommandBufferAllocateInfo {
-                    command_buffer_count: 1,
-                    command_pool: self.command_pool,
-                    level: vk::CommandBufferLevel::PRIMARY,
+    ) -> anyhow::Result<()> {
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::default();
+
+        unsafe {
+            self.device.reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
+
+            self.device
+                .begin_command_buffer(command_buffer, &command_buffer_begin_info)?;
+
+            self.device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_KHR,
+                self.pipeline,
+            );
+            self.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_KHR,
+                self.pipeline_layout,
+                0,
+                &[self.descriptor_set],
+                &[],
+            );
+
+            self.device.cmd_push_constants(
+                command_buffer,
+                self.pipeline_layout,
+                vk::ShaderStageFlags::RAYGEN_KHR,
+                0,
+                &self.camera_data,
+            );
+
+            self.rt_pipeline_device.cmd_trace_rays(
+                command_buffer,
+                &self.raygen_region,
+                &self.miss_region,
+                &self.hit_region,
+                &self.callable_region,
+                width,
+                height,
+                1,
+            );
+
+            self.device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR | vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[vk::MemoryBarrier {
+                    src_access_mask: vk::AccessFlags::SHADER_WRITE,
+                    dst_access_mask: vk::AccessFlags::TRANSFER_READ,
                     ..Default::default()
-                };
+                }],
+                &[],
+                &[vk::ImageMemoryBarrier {
+                    src_access_mask: vk::AccessFlags::NONE,
+                    dst_access_mask: vk::AccessFlags::TRANSFER_WRITE,
+                    old_layout: vk::ImageLayout::UNDEFINED,
+                    new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    image: target_image,
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                    ..Default::default()
+                }],
+            );
 
-                unsafe { self.device.allocate_command_buffers(&allocate_info)?[0] }
-            };
-
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::default();
-
-            unsafe {
-                self.device
-                    .begin_command_buffer(command_buffer, &command_buffer_begin_info)?;
-
-                self.device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::RAY_TRACING_KHR,
-                    self.pipeline,
-                );
-                self.device.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::RAY_TRACING_KHR,
-                    self.pipeline_layout,
-                    0,
-                    &[self.descriptor_set],
-                    &[],
-                );
-
-                self.device.cmd_push_constants(
-                    command_buffer,
-                    self.pipeline_layout,
-                    vk::ShaderStageFlags::RAYGEN_KHR,
-                    0,
-                    &self.camera_data,
-                );
-
-                self.rt_pipeline_device.cmd_trace_rays(
-                    command_buffer,
-                    &self.raygen_region,
-                    &self.miss_region,
-                    &self.hit_region,
-                    &self.callable_region,
-                    width,
-                    height,
-                    1,
-                );
-
-                self.device.cmd_pipeline_barrier(
-                    command_buffer,
-                    vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR
-                        | vk::PipelineStageFlags::TRANSFER,
-                    vk::PipelineStageFlags::TRANSFER,
-                    vk::DependencyFlags::empty(),
-                    &[vk::MemoryBarrier {
-                        src_access_mask: vk::AccessFlags::SHADER_WRITE,
-                        dst_access_mask: vk::AccessFlags::TRANSFER_READ,
-                        ..Default::default()
-                    }],
-                    &[],
-                    &[vk::ImageMemoryBarrier {
-                        src_access_mask: vk::AccessFlags::NONE,
-                        dst_access_mask: vk::AccessFlags::TRANSFER_WRITE,
-                        old_layout: vk::ImageLayout::UNDEFINED,
-                        new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                        image: *target_image,
-                        subresource_range: vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
+            self.device.cmd_blit_image(
+                command_buffer,
+                self.storage_image,
+                vk::ImageLayout::GENERAL,
+                target_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[vk::ImageBlit {
+                    src_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                    src_offsets: [
+                        vk::Offset3D { x: 0, y: 0, z: 0 },
+                        vk::Offset3D {
+                            x: width as i32,
+                            y: height as i32,
+                            z: 1,
                         },
-                        ..Default::default()
-                    }],
-                );
-
-                self.device.cmd_blit_image(
-                    command_buffer,
-                    self.storage_image,
-                    vk::ImageLayout::GENERAL,
-                    *target_image,
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    &[vk::ImageBlit {
-                        src_subresource: vk::ImageSubresourceLayers {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            mip_level: 0,
-                            base_array_layer: 0,
-                            layer_count: 1,
+                    ],
+                    dst_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                    dst_offsets: [
+                        vk::Offset3D { x: 0, y: 0, z: 0 },
+                        vk::Offset3D {
+                            x: width as i32,
+                            y: height as i32,
+                            z: 1,
                         },
-                        src_offsets: [
-                            vk::Offset3D { x: 0, y: 0, z: 0 },
-                            vk::Offset3D {
-                                x: width as i32,
-                                y: height as i32,
-                                z: 1,
-                            },
-                        ],
-                        dst_subresource: vk::ImageSubresourceLayers {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            mip_level: 0,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        },
-                        dst_offsets: [
-                            vk::Offset3D { x: 0, y: 0, z: 0 },
-                            vk::Offset3D {
-                                x: width as i32,
-                                y: height as i32,
-                                z: 1,
-                            },
-                        ],
-                    }],
-                    vk::Filter::LINEAR,
-                );
+                    ],
+                }],
+                vk::Filter::LINEAR,
+            );
 
-                self.device.cmd_pipeline_barrier(
-                    command_buffer,
-                    vk::PipelineStageFlags::TRANSFER,
-                    vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                    vk::DependencyFlags::empty(),
-                    &[],
-                    &[],
-                    &[vk::ImageMemoryBarrier {
-                        src_access_mask: vk::AccessFlags::TRANSFER_WRITE,
-                        dst_access_mask: vk::AccessFlags::NONE,
-                        old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                        new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                        image: *target_image,
-                        subresource_range: vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        },
-                        ..Default::default()
-                    }],
-                );
+            self.device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[vk::ImageMemoryBarrier {
+                    src_access_mask: vk::AccessFlags::TRANSFER_WRITE,
+                    dst_access_mask: vk::AccessFlags::NONE,
+                    old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                    image: target_image,
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                    ..Default::default()
+                }],
+            );
 
-                self.device.end_command_buffer(command_buffer)?;
-            }
-
-            command_buffers.push(command_buffer)
+            self.device.end_command_buffer(command_buffer)?;
         }
 
-        Ok(command_buffers)
+        Ok(())
     }
 }
 
@@ -1039,6 +1036,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         let command_pool = {
             let create_info = vk::CommandPoolCreateInfo {
                 queue_family_index: compute_queue_index,
+                flags: vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
                 ..Default::default()
             };
             unsafe { device.create_command_pool(&create_info, None) }?
@@ -1183,13 +1181,15 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             )?
         });
 
-        self.brdf_param_buffer = Some(unsafe {
-            self.create_device_buffer(
-                &scene.brdf_buf,
-                vk::BufferUsageFlags::STORAGE_BUFFER,
-                allocator,
-            )?
-        });
+        if !scene.brdf_buf.is_empty() {
+            self.brdf_param_buffer = Some(unsafe {
+                self.create_device_buffer(
+                    &scene.brdf_buf,
+                    vk::BufferUsageFlags::STORAGE_BUFFER,
+                    allocator,
+                )?
+            });
+        }
 
         let view_inverse_cols = scene.camera.view.inverse().to_cols_array();
         let proj_inverse_cols = scene.camera.perspective.inverse().to_cols_array();
@@ -1241,6 +1241,9 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         .iter()
         .enumerate()
         {
+            if buf.is_none() {
+                continue;
+            }
             buffer_infos.push(vk::DescriptorBufferInfo {
                 buffer: buf.as_ref().unwrap().buffer,
                 range: vk::WHOLE_SIZE,
@@ -1269,14 +1272,25 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         updates: &[<MeshScene as Scene>::Update],
         target: &mut WindowData,
     ) -> anyhow::Result<()> {
-        //for update in updates {}
-
-        if self.command_buffers.is_empty() {
-            self.command_buffers =
-                self.create_command_buffer(target.get_images(), target.get_size())?;
+        for update in updates {
+            match update {
+                MeshSceneUpdate::NewView(view) => {
+                    let view_inverse_cols = view.inverse().to_cols_array();
+                    let view_bytes: &[u8] = bytemuck::cast_slice(&view_inverse_cols);
+                    self.camera_data[0..64].copy_from_slice(&view_bytes);
+                }
+                _ => (),
+            }
         }
 
-        let image_index = target.acquire_next_image()?;
+        let (image, image_index) = target.acquire_next_image()?;
+
+        if image_index as usize >= self.command_buffers.len() {
+            self.command_buffers.push(self.create_command_buffer()?);
+        }
+
+        self.record_command_buffer(self.command_buffers[image_index as usize], image, target.get_size())?;
+
         let (image_semaphore, render_semaphore) = target.get_current_semaphores();
         let wait_stage = vk::PipelineStageFlags::TRANSFER;
         let submit_info = vk::SubmitInfo {

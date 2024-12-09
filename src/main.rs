@@ -1,6 +1,7 @@
 use std::ffi::{c_char, c_void, CStr};
 use std::fs::File;
 use std::ptr;
+use std::sync::Arc;
 
 use anyhow::Result;
 use ash::vk::{
@@ -16,19 +17,21 @@ use ash::{
 use debug::DebugUtilsData;
 use defer::Defer;
 use env_logger::Builder;
-use glam::Mat4;
+use glam::{Mat3, Mat4, Vec3, Vec4};
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use log::{debug, warn, LevelFilter};
 use render::renderers::RaytraceRenderer;
 use render::Renderer;
-use scene::scenes::mesh::{Camera, MeshScene};
+use scene::scenes::mesh::{MeshScene, MeshSceneUpdate};
 use scene::Scene;
 use utils::{query_queue_families, QueueFamilyInfo};
 use window::WindowData;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{DeviceEvent, DeviceId, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, KeyEvent, RawKeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{Key, KeyCode, PhysicalKey};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::{CursorGrabMode, WindowAttributes, WindowId};
 
@@ -63,7 +66,15 @@ struct MeshApp<R> {
     instance: Instance,
     vk_lib: Entry,
     scene: MeshScene,
-    view_update: Option<Mat4>,
+    position: Vec3,
+    direction: Vec3,
+    view_updated: bool,
+    w_down: bool,
+    a_down: bool,
+    s_down: bool,
+    d_down: bool,
+    shift_down: bool,
+    space_down: bool,
 }
 
 impl<R> MeshApp<R>
@@ -117,6 +128,9 @@ where
             })
             .transpose()?;
 
+        let position = scene.camera.view.inverse().col(3).truncate();
+        let direction = scene.camera.view.inverse().col(2).truncate();
+
         Ok(MeshApp {
             renderer: None,
             window: None,
@@ -127,7 +141,15 @@ where
             instance: instance.undefer(),
             vk_lib,
             scene,
-            view_update: None,
+            position,
+            direction,
+            view_updated: false,
+            w_down: false,
+            a_down: false,
+            s_down: false,
+            d_down: false,
+            shift_down: false,
+            space_down: false,
         })
     }
 
@@ -448,18 +470,85 @@ where
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput {
-                device_id,
-                event,
-                is_synthetic,
-            } => {}
+                device_id: _device_id,
+                event: input_event,
+                is_synthetic: _is_synthetic,
+            } => {
+                match input_event.physical_key {
+                    PhysicalKey::Code(KeyCode::KeyW) => {
+                        self.w_down = input_event.state.is_pressed()
+                    }
+                    PhysicalKey::Code(KeyCode::KeyA) => {
+                        self.a_down = input_event.state.is_pressed()
+                    }
+                    PhysicalKey::Code(KeyCode::KeyS) => {
+                        self.s_down = input_event.state.is_pressed()
+                    }
+                    PhysicalKey::Code(KeyCode::KeyD) => {
+                        self.d_down = input_event.state.is_pressed()
+                    }
+                    PhysicalKey::Code(KeyCode::ShiftLeft) => {
+                        self.shift_down = input_event.state.is_pressed()
+                    }
+                    PhysicalKey::Code(KeyCode::Space) => {
+                        self.space_down = input_event.state.is_pressed()
+                    }
+                    _ => ()
+                }
+                match input_event.key_without_modifiers().as_ref() {
+                    Key::Character("w") => {
+                        self.position += self.direction * 0.05f32;
+                        self.view_updated = true;
+                    }
+                    _ => ()
+                }
+            }
             WindowEvent::RedrawRequested => {
+                const SPEED: f32 = 0.005f32;
+                let horiz_dir: Vec3 = Vec3::new(-self.direction.y, self.direction.x, 0f32).normalize();
+                let vert_dir: Vec3 = self.direction.cross(horiz_dir);
+                if self.w_down {
+                    self.position += SPEED * self.direction;
+                    self.view_updated = true;
+                }
+                if self.s_down {
+                    self.position -= SPEED * self.direction;
+                    self.view_updated = true;
+                }
+                if self.a_down {
+                    self.position -= SPEED * horiz_dir;
+                    self.view_updated = true;
+                }
+                if self.d_down {
+                    self.position += SPEED * horiz_dir;
+                    self.view_updated = true;
+                }
+                if self.shift_down {
+                    self.position -= SPEED * vert_dir;
+                    self.view_updated = true;
+                }
+                if self.space_down {
+                    self.position += SPEED * vert_dir;
+                    self.view_updated = true;
+                }
+
+                let updates = if self.view_updated {
+                    vec![MeshSceneUpdate::NewView(Mat4::look_to_lh(
+                        self.position,
+                        self.direction,
+                        Vec3::new(0f32, 0f32, 1f32),
+                    ))]
+                } else {
+                    vec![]
+                };
+
                 self.renderer
                     .as_mut()
                     .unwrap()
-                    .render_to(&[], self.window.as_mut().unwrap())
+                    .render_to(&updates, self.window.as_mut().unwrap())
                     .expect("failed to render to target");
 
-                self.view_update = None;
+                self.view_updated = false;
 
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -475,15 +564,22 @@ where
     ) {
         match event {
             DeviceEvent::MouseMotion { delta: (dx, dy) } => {
-                let view_update = if let Some(update) = self.view_update {
-                    update
-                } else {
-                    self.scene.camera.view
-                };
+                let (sx, sy) = self.window.as_ref().unwrap().get_size();
+                let ry_axis = Vec3::new(-self.direction.y, self.direction.x, 0f32);
+                let rx_axis = Vec3::new(0f32, 0f32, 1f32);
+                let rx = (dx / sx as f64) as f32;
+                let ry = (dy / sy as f64) as f32;
 
-                let rotation = Mat4::from_euler(glam::EulerRot::XYZ, dx as f32, dy as f32, 0f32);
+                let rotation = Mat3::from_axis_angle(rx_axis, rx)
+                    * Mat3::from_axis_angle(ry_axis.normalize(), ry);
 
-                self.view_update = Some(rotation * view_update);
+                let new_direction = rotation * self.direction;
+
+                if new_direction.truncate().dot(self.direction.truncate()) >= 0f32 {
+                    self.direction = new_direction.normalize();
+                }
+
+                self.view_updated = true;
             }
             _ => (),
         }

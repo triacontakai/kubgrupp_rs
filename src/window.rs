@@ -90,10 +90,6 @@ impl WindowData {
         Ok(())
     }
 
-    pub fn get_images(&self) -> &[vk::Image] {
-        &self.images
-    }
-
     pub fn get_current_semaphores(&self) -> (vk::Semaphore, vk::Semaphore) {
         (
             self.image_semaphores[self.current_frame],
@@ -105,7 +101,7 @@ impl WindowData {
         self.flight_fences[self.current_frame]
     }
 
-    pub fn acquire_next_image(&mut self) -> Result<u32> {
+    pub fn acquire_next_image(&mut self) -> Result<(vk::Image, u32)> {
         let image_semaphore = self.image_semaphores[self.current_frame];
         let flight_fence = self.flight_fences[self.current_frame];
 
@@ -125,7 +121,7 @@ impl WindowData {
 
         unsafe { self.device.reset_fences(&[flight_fence])? };
 
-        Ok(self.current_image)
+        Ok((self.images[self.current_image as usize], self.current_image))
     }
 
     pub fn request_redraw(&self) {
