@@ -12,7 +12,6 @@ layout(location = 0) rayPayloadInEXT RayPayload ray_info;
 
 struct BrdfParams {
     vec3 albedo;
-    float _padding;
 };
 
 layout(scalar, set = 0, binding = 6) readonly buffer Fields {
@@ -20,6 +19,5 @@ layout(scalar, set = 0, binding = 6) readonly buffer Fields {
 } instance_info;
 
 void main() {
-    debugPrintfEXT("flat hit");
     ray_info.rad = instance_info.params[nonuniformEXT(gl_InstanceID)].albedo;
 }

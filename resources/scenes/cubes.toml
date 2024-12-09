@@ -34,16 +34,13 @@ chit_shader = "flat.rchit"
 [[brdf.field]]
 name = "albedo"
 type = "vec3"
-[[brdf.field]]
-name = "_padding"
-type = "float"
 
 [[object]]
 mesh = "cube.obj"
 transform = '''
 identity
 '''
-brdf = {name = "flat", fields = [[0.2, 0.8, 0.2], 0.0]}
+brdf = {name = "flat", fields = [[0.2, 0.8, 0.2]]}
 
 [[object]]
 mesh = "cube.obj"
@@ -51,4 +48,4 @@ transform = '''
 rotate 45 0 0 1
 translate 1 1 0
 '''
-brdf = {name = "flat", fields = [[0.8, 0.2, 0.2], 0.0]}
+brdf = {name = "flat", fields = [[0.8, 0.2, 0.2]]}

@@ -1148,15 +1148,19 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             )?
         });
 
-        let mut light_data = Vec::new();
+        let mut light_data = Vec::<u8>::new();
         for light in scene.lights.iter() {
             if let Light::Point { color, position } = light {
-                light_data.extend(color.to_array());
-                light_data.extend(position.to_array());
+                light_data.extend_from_slice(bytemuck::cast_slice(&[0u32]));
+                light_data.extend_from_slice(bytemuck::cast_slice(&color.to_array()));
+                light_data.extend_from_slice(bytemuck::cast_slice(&position.to_array()));
+                light_data.extend_from_slice(bytemuck::cast_slice(&[0f32; 9]));
             } else if let Light::Triangle { color, vertices } = light {
-                light_data.extend(color.to_array());
+                light_data.extend_from_slice(bytemuck::cast_slice(&[1u32]));
+                light_data.extend_from_slice(bytemuck::cast_slice(&color.to_array()));
+                light_data.extend_from_slice(bytemuck::cast_slice(&[0f32, 0f32, 0f32]));
                 for vertex in vertices {
-                    light_data.extend(vertex.to_array());
+                    light_data.extend_from_slice(bytemuck::cast_slice(&vertex.to_array()));
                 }
             }
         }
@@ -1341,6 +1345,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
                 vk::PhysicalDeviceFeatures {},
                 vk::PhysicalDeviceVulkan12Features {
                     buffer_device_address,
+                    scalar_block_layout,
                     timeline_semaphore,
                 },
                 vk::PhysicalDeviceAccelerationStructureFeaturesKHR {

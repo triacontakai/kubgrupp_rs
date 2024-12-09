@@ -12,14 +12,23 @@ layout(location = 0) rayPayloadInEXT RayPayload ray_info;
 
 struct BrdfParams {
     vec3 color;
-    float _padding;
 };
+
+struct Light {
+    uint type;
+    vec3 color;
+    vec3 position;
+    vec3 vertices[3];
+};
+
+layout(scalar, set = 0, binding = 4) readonly buffer Lights {
+    Light lights[];
+} lights;
 
 layout(scalar, set = 0, binding = 6) readonly buffer Fields {
     BrdfParams params[];
 } instance_info;
 
 void main() {
-    debugPrintfEXT("emitter hit");
-    ray_info.rad = vec3(0.0, 0.0, 1.0);//instance_info.params[nonuniformEXT(gl_InstanceID)].color;
+    ray_info.rad = lights.lights[nonuniformEXT(gl_InstanceCustomIndexEXT)].color;
 }

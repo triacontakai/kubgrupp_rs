@@ -9,5 +9,5 @@
 layout(location = 0) rayPayloadInEXT RayPayload ray_info;
 
 void main() {
-    ray_info.rad = vec3(1);
+    ray_info.rad = vec3(0);
 }
