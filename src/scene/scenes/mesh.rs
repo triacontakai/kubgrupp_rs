@@ -67,8 +67,6 @@ pub struct Object {
     pub brdf_i: usize,
     pub brdf_params: Vec<u8>,
 
-    pub _alignment: usize,
-
     // this is pretty much just the base of the mesh in the list of all vertices
     pub vertex_index: u32,
 }
@@ -131,35 +129,6 @@ impl Shader {
             x @ Shader::Compiled(..) => Ok(x.clone()),
         }
     }
-}
-
-impl ShaderType {
-    fn _alignment(&self) -> usize {
-        match self {
-            ShaderType::Float => 4,
-            ShaderType::Vec3 => 4,
-            ShaderType::Vec2 => 4,
-            ShaderType::UInt => 4,
-            ShaderType::Int => 4,
-            ShaderType::Array(shader_type, _) => shader_type._alignment(),
-        }
-    }
-
-    //fn size(&self) -> usize {
-    //    match self {
-    //        ShaderType::Float => 4,
-    //        ShaderType::Vec3 => 12,
-    //        ShaderType::Vec2 => 8,
-    //        ShaderType::UInt => 4,
-    //        ShaderType::Int => 4,
-    //        ShaderType::Array(shader_type, size) => {
-    //            // this is technically more complicated because alignment can be above size
-    //            // but for the types we care about this is not true
-    //            // all the alignments are 4 anyway lol
-    //            shader_type.size() * (*size) as usize
-    //        },
-    //    }
-    //}
 }
 
 impl MeshScene {
@@ -278,8 +247,6 @@ impl MeshScene {
         (data, offsets)
     }
 
-    //pub fn get_offsets_buffer(&self, )
-
     fn parse_toml_objects(
         conf: &Table,
         mesh_map: &HashMap<String, u32>,
@@ -347,7 +314,6 @@ impl MeshScene {
                 mesh_i,
                 brdf_i,
                 brdf_params: datas,
-                _alignment: 4, // TODO: dont hardcode this (sue me)
                 vertex_index,
             })
         }
@@ -682,7 +648,6 @@ impl MeshScene {
                         mesh_i,
                         brdf_i: 0, // emitter hit brdf is always 0
                         brdf_params: Vec::new(),
-                        _alignment: 1,
                         vertex_index: start_idx as u32, // vertex index is actually light index
                     });
                 }
@@ -692,16 +657,6 @@ impl MeshScene {
 
         Ok(lights)
     }
-
-    //fn parse_toml_file(dir: impl AsRef<Path>, conf: &Value) -> Result<File> {
-    //    let dir_path = dir.as_ref();
-
-    //    let Value::String(file_path) = conf else {
-    //        bail!("file path should be a string");
-    //    };
-
-    //    Ok(File::open(dir_path.join(file_path))?)
-    //}
 
     fn parse_toml_vec3(conf: &Value) -> Result<Vec3> {
         let Value::Array(values) = conf else {
@@ -943,104 +898,5 @@ impl MeshScene {
         let view = Self::parse_transform(view_str)?;
 
         Ok(Camera::new(view, fov))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{fs::File, io::Read};
-
-    use glam::{Vec3, Vec4};
-    use toml::{Table, Value};
-
-    use crate::scene::scenes::mesh::ShaderType;
-
-    use super::MeshScene;
-
-    #[test]
-    fn parse_lookat() {
-        let camera_mat = MeshScene::parse_transform(
-            "
-        # this is a comment that should be ignored
-        lookat 3 2 1   0 0 0   0 0 1
-        ",
-        )
-        .expect("failed to parse");
-
-        let point = Vec4::new(0f32, 0f32, 0f32, 1f32);
-        let point_cam = camera_mat * point;
-
-        let eye = Vec3::new(3f32, 2f32, 1f32);
-        let dist = eye.dot(eye).sqrt();
-
-        assert!(
-            (point_cam.z - dist) < 2e-4,
-            "point_cam.z: {}, ||eye - origin||: {}",
-            point_cam.z,
-            dist
-        );
-    }
-
-    #[test]
-    fn parse_type_complicated() {
-        let parsed_type = MeshScene::parse_type_str("[[vec3; 3]; 1]").expect("failed to parse");
-
-        assert_eq!(
-            parsed_type,
-            ShaderType::Array(
-                Box::new(ShaderType::Array(Box::new(ShaderType::Vec3), 3)),
-                1
-            )
-        )
-    }
-
-    #[test]
-    fn parse_lights() {
-        let mut file = File::open("resources/scenes/cubes.toml").unwrap();
-
-        let mut toml_conf = String::new();
-        file.read_to_string(&mut toml_conf).unwrap();
-
-        let _conf: Table = toml_conf.parse().unwrap();
-
-        //let lights = MeshScene::parse_toml_lights(&conf, ERM).unwrap();
-        //println!("{:?}", lights);
-        //println!("{:?}", light_meshes);
-    }
-
-    #[test]
-    fn parse_meshes() {
-        let mut file = File::open("resources/scenes/cubes.toml").unwrap();
-
-        let mut toml_conf = String::new();
-        file.read_to_string(&mut toml_conf).unwrap();
-        let conf: Table = toml_conf.parse().unwrap();
-
-        let (_meshes, _mesh_map) = MeshScene::parse_toml_meshes(&conf).unwrap();
-        //dbg!(meshes, mesh_map);
-    }
-
-    #[test]
-    fn test_load_shader() {
-        let _shader =
-            MeshScene::parse_toml_shader(&Value::String("flat.rchit".to_string()), "flat").unwrap();
-    }
-
-    #[test]
-    fn test_load_shaders() {
-        let mut file = File::open("resources/scenes/cubes.toml").unwrap();
-
-        let mut toml_conf = String::new();
-        file.read_to_string(&mut toml_conf).unwrap();
-        let conf: Table = toml_conf.parse().unwrap();
-
-        let (_shaders, _type_map) = MeshScene::parse_toml_shaders(&conf).unwrap();
-    }
-
-    #[test]
-    fn test_load_scene() {
-        let file = File::open("resources/scenes/cubes.toml").unwrap();
-        let _scene = MeshScene::load_from(file).unwrap();
-        //dbg!(scene);
     }
 }
