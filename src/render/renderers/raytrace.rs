@@ -425,7 +425,7 @@ impl RaytraceRenderer {
         descriptor_set_layouts: &[vk::DescriptorSetLayout],
     ) -> anyhow::Result<(vk::PipelineLayout, vk::Pipeline, usize)> {
         let push_constant_range = vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
+            stage_flags: vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             offset: 0,
             size: std::mem::size_of_val(&self.push_data) as u32,
         };
@@ -902,7 +902,7 @@ impl RaytraceRenderer {
             self.device.cmd_push_constants(
                 command_buffer,
                 self.pipeline_layout,
-                vk::ShaderStageFlags::RAYGEN_KHR,
+                vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
                 0,
                 &self.push_data,
             );
