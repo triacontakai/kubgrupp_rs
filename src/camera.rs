@@ -32,6 +32,8 @@ pub struct Camera {
     key_movements: BTreeMap<KeyCode, (Direction, Box<dyn Fn(&Vec3) -> Vec3>)>,
     movement_direction: u32,
     updated_view: bool,
+
+    speed_modifier: f32,
 }
 
 impl Debug for Camera {
@@ -108,6 +110,7 @@ impl Camera {
             key_movements,
             movement_direction: Direction::None as u32,
             updated_view: false,
+            speed_modifier: 1f32,
         }
     }
 
@@ -125,6 +128,9 @@ impl Camera {
             } else {
                 self.movement_direction &= !(*direction as u32);
             }
+        }
+        if key == KeyCode::AltLeft {
+            self.speed_modifier = 1.0f32 - 0.5f32 * (pressed as u32 as f32);
         }
     }
 
@@ -149,7 +155,8 @@ impl Camera {
     pub fn handle_movement(&mut self, dt: f32) {
         for (d, movement_fn) in self.key_movements.values() {
             if self.movement_direction & (*d as u32) == (*d as u32) {
-                self.position += Camera::SPEED * dt * movement_fn(&self.direction);
+                self.position +=
+                    Camera::SPEED * dt * self.speed_modifier * movement_fn(&self.direction);
                 self.updated_view = true;
             }
         }
