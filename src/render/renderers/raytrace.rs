@@ -968,7 +968,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             &self.device,
             &mut self.allocator.borrow_mut(),
             (WindowData::DEFAULT_WIDTH, WindowData::DEFAULT_HEIGHT),
-            vk::Format::R8G8B8A8_UNORM,
+            vk::Format::R32G32B32A32_SFLOAT,
             vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC,
             MemoryLocation::GpuOnly,
         )?);

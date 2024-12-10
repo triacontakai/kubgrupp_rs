@@ -12,7 +12,7 @@ fov = 70
 [[light]]
 type = "point"
 #color = [0.84, 0.76, 0.56]
-color = [100, 100, 100]
+color = [20, 20, 20]
 position = [-5, -5, 10]
 
 #[[light]]
