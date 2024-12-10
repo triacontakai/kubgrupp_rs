@@ -34,4 +34,6 @@ void main() {
     // translation + rotation
     vec3 final_normal = normalize(gl_ObjectToWorldEXT * vec4(interp_normal, 0));
     ray_info.rad = abs(final_normal);
+    ray_info.is_hit = true;
+    ray_info.is_emitter = true;
 }

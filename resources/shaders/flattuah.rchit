@@ -15,6 +15,13 @@ layout(scalar, set = 0, binding = 5) readonly buffer InstanceOffsets {
     Offsets offsets[];
 } offsets;
 
+struct BrdfParams {
+    uint _erm;
+    vec3 albedo;
+    vec2 _bad2;
+    uint _bad3;
+};
+
 layout(scalar, set = 0, binding = 6) readonly buffer Fields {
     BrdfParams params[];
 } instance_info;

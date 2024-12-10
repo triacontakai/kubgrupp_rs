@@ -1,0 +1,103 @@
+[global_shaders]
+raygen = "path.rgen"
+miss = "black.rmiss"
+emitter_hit = "emitter.rchit"
+
+[camera]
+view = '''
+lookat 4 0 2   0 0 0    0 0 1
+'''
+fov = 70
+
+[[light]]
+type = "point"
+#color = [0.84, 0.76, 0.56]
+color = [100, 100, 100]
+position = [-5, -5, 10]
+
+#[[light]]
+#type = "point"
+#color = [0.5, 0.5, 0.5]
+#position = [5, 5, 10]
+
+#[[light]]
+#type = "area"
+#color = [0.5, 0.1, 0.5]
+#mesh = "square.obj"
+#transform = '''
+#rotate 45 0 0 1
+#translate 3 0 0
+#'''
+
+[[brdf]]
+name = "diffuse"
+chit_shader = "diffuse.rchit"
+[[brdf.field]]
+name = "albedo"
+type = "vec3"
+
+[[brdf]]
+name = "normals"
+chit_shader = "normals.rchit"
+field = []
+
+[[brdf]]
+name = "checkerboard"
+chit_shader = "checkerboard.rchit"
+[[brdf.field]]
+name = "albedo_1"
+type = "vec3"
+[[brdf.field]]
+name = "albedo_2"
+type = "vec3"
+[[brdf.field]]
+name = "scale"
+type = "float"
+
+[[object]]
+mesh = "cube.obj"
+transform = '''
+translate 0 -2 0
+'''
+brdf = {name = "diffuse", fields = [[0.2, 0.2, 0.8]]}
+
+[[object]]
+mesh = "cube.obj"
+transform = '''
+translate -.5 -.5 0
+'''
+brdf = {name = "diffuse", fields = [[0.2, 0.8, 0.2]]}
+
+[[object]]
+mesh = "cube.obj"
+transform = '''
+rotate 45 0 0 1
+translate 1 1 0
+'''
+brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.2]]}
+
+#[[object]]
+#mesh = "sphere.obj"
+#transform = '''
+#scale .5 .5 .5
+#translate 3 -1 .5
+#'''
+#brdf = {name = "normals", fields = []}
+
+[[object]]
+mesh = "square.obj"
+transform = '''
+translate -.5 -.5 -.001
+scale 10 10 10
+'''
+brdf = {name = "diffuse", fields = [[0.6, 0.6, 0.6]]}
+#brdf = {name = "checkerboard", fields = [[0.5, 0.5, 0.5], [0.6, 0.6, 0.6], 1]}
+
+#[[object]]
+#mesh = "teapot.obj"
+#transform = '''
+#rotate 90 1 0 0
+#scale .4 .4 .4
+#translate 0 0 2
+#'''
+#brdf = {name = "normals", fields = []}

@@ -1,4 +1,4 @@
 #!/bin/sh
 
 ./build_shaders.py
-cargo run
+cargo run -- --scene-file $1

@@ -10,4 +10,5 @@ layout(location = 0) rayPayloadInEXT RayPayload ray_info;
 
 void main() {
     ray_info.rad = vec3(0);
+    ray_info.is_hit = false;
 }

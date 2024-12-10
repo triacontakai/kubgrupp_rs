@@ -1,6 +1,25 @@
 struct RayPayload {
-    vec3 ray_o;
-    vec3 ray_d;
+    // inputs
+    vec2 pixel;
+    uint seed;
+
+    // outputs
+    bool is_hit;
+    bool is_emitter;
     vec3 rad;
+    vec3 hit_pos;
+    vec3 hit_normal;
+
+    vec3 brdf_vals;
+    vec3 brdf_d;
+    float brdf_pdf;
+
+    vec3 emitter_o;
+    float emitter_pdf;
+    vec3 emitter_brdf_vals;
+    vec3 emitter_normal;
+    
+    // TODO: add fields for MIS
 };
 
+const float PI = 3.1415926535897932384626433832795;

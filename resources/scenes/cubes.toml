@@ -1,5 +1,5 @@
 [global_shaders]
-raygen = "raygen.rgen"
+raygen = "path.rgen"
 miss = "black.rmiss"
 emitter_hit = "emitter.rchit"
 
@@ -14,19 +14,19 @@ type = "point"
 color = [0.84, 0.76, 0.56]
 position = [-5, -5, 10]
 
-[[light]]
-type = "point"
-color = [0.5, 0.5, 0.5]
-position = [5, 5, 10]
+#[[light]]
+#type = "point"
+#color = [0.5, 0.5, 0.5]
+#position = [5, 5, 10]
 
-[[light]]
-type = "area"
-color = [0.5, 0.1, 0.5]
-mesh = "square.obj"
-transform = '''
-rotate 45 0 0 1
-translate 3 0 0
-'''
+#[[light]]
+#type = "area"
+#color = [0.5, 0.1, 0.5]
+#mesh = "square.obj"
+#transform = '''
+#rotate 45 0 0 1
+#translate 3 0 0
+#'''
 
 [[brdf]]
 name = "flat"
@@ -39,6 +39,19 @@ type = "vec3"
 name = "normals"
 chit_shader = "normals.rchit"
 field = []
+
+[[brdf]]
+name = "checkerboard"
+chit_shader = "checkerboard.rchit"
+[[brdf.field]]
+name = "albedo_1"
+type = "vec3"
+[[brdf.field]]
+name = "albedo_2"
+type = "vec3"
+[[brdf.field]]
+name = "scale"
+type = "float"
 
 [[object]]
 mesh = "cube.obj"
@@ -72,6 +85,14 @@ scale .5 .5 .5
 translate 3 -1 .5
 '''
 brdf = {name = "normals", fields = []}
+
+[[object]]
+mesh = "square.obj"
+transform = '''
+translate -.5 -.5 -.001
+scale 10 10 10
+'''
+brdf = {name = "checkerboard", fields = [[0.5, 0.5, 0.5], [0.6, 0.6, 0.6], 1]}
 
 #[[object]]
 #mesh = "teapot.obj"

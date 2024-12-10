@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::ffi::{c_char, c_void, CStr};
 use std::fs::File;
+use std::path::Path;
 use std::ptr;
 use std::rc::Rc;
 
@@ -15,6 +16,7 @@ use ash::{
     Entry, Instance,
 };
 
+use clap::Parser;
 use debug::DebugUtilsData;
 use defer::Defer;
 use env_logger::Builder;
@@ -581,15 +583,25 @@ where
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    scene_file: String,
+}
+
 fn main() {
     Builder::new()
         .filter_level(LevelFilter::Debug)
         .parse_default_env()
         .init();
 
+    let args = Args::parse();
+
     let event_loop = EventLoop::new().unwrap();
 
-    let file = File::open("resources/scenes/cubes.toml").expect("scene file does not exist");
+    let path = Path::new("resources/scenes/").join(&args.scene_file);
+    let file = File::open(path).expect("scene file does not exist");
     let scene = MeshScene::load_from(file).expect("scene could not be loaded");
     let mut app: MeshApp<RaytraceRenderer> = MeshApp::new(&event_loop, scene, DEBUG_MODE).unwrap();
     event_loop.run_app(&mut app).unwrap();

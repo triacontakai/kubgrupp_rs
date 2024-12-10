@@ -1,7 +1,3 @@
-struct BrdfParams {
-    vec3 albedo;
-};
-
 struct Offsets {
     uint brdf_i;
 };
@@ -17,6 +13,9 @@ struct Vertex {
     vec3 position;
     vec3 normal;
 };
+
+const uint EMITTER_TYPE_POINT = 0;
+const uint EMITTER_TYPE_AREA = 1;
 
 //layout(scalar, set = 0, binding = 2) readonly buffer Vertices {
 //    Vertex vertices[];
