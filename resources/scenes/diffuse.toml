@@ -9,25 +9,24 @@ lookat 4 0 2   0 0 0    0 0 1
 '''
 fov = 70
 
-[[light]]
-type = "point"
-#color = [0.84, 0.76, 0.56]
-color = [100, 100, 100]
-position = [-5, -5, 10]
+#[[light]]
+#type = "point"
+#color = [100, 100, 100]
+#position = [-5, -5, 10]
 
 #[[light]]
 #type = "point"
-#color = [0.5, 0.5, 0.5]
+#color = [200, 100, 100]
 #position = [5, 5, 10]
 
-#[[light]]
-#type = "area"
-#color = [0.0, 0.0, 0.0]
-#mesh = "square.obj"
-#transform = '''
-#rotate 45 0 0 1
-#translate 3 0 10
-#'''
+[[light]]
+type = "area"
+color = [20, 20, 20]
+mesh = "square.obj"
+transform = '''
+rotate 45 0 0 1
+translate 3 0 5
+'''
 
 [[brdf]]
 name = "diffuse"
@@ -74,6 +73,7 @@ transform = '''
 rotate 45 0 0 1
 translate 1 1 0
 '''
+#brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.2]]}
 brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.2]]}
 
 [[object]]
@@ -87,8 +87,8 @@ brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.8]]}
 [[object]]
 mesh = "square.obj"
 transform = '''
-translate -.5 -.5 -.00001
-scale 10 10 10
+translate -.5 -.5 -0.0001
+scale 10 10 1
 '''
 brdf = {name = "diffuse", fields = [[0.6, 0.6, 0.6]]}
 #brdf = {name = "checkerboard", fields = [[0.5, 0.5, 0.5], [0.6, 0.6, 0.6], 1]}

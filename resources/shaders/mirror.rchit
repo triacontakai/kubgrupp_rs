@@ -35,15 +35,6 @@ layout(scalar, set = 0, binding = 6) readonly buffer Fields {
     BrdfParams params[];
 } instance_info;
 
-vec4 sample_cosine_hemisphere() {
-    float u = rnd(ray_info.seed);
-    float v = rnd(ray_info.seed);
-    float theta = acos(sqrt(u));
-    float phi = 2 * PI * v;
-
-    return vec4(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta), cos(theta)/PI);
-}
-
 void sample_brdf(vec3 hit_normal) {
     uint brdf_i = offsets.offsets[gl_InstanceID].brdf_i;
     BrdfParams brdf = instance_info.params[brdf_i];
@@ -53,68 +44,28 @@ void sample_brdf(vec3 hit_normal) {
     float pdf = cos_sample.w;
 
     ray_info.brdf_vals = brdf.albedo;
-    ray_info.brdf_pdf = pdf;
+    ray_info.brdf_pdf = 1;
 
     // we need to convert the wi sample to be relative to the normal
     // do this by creating a rotation from (0, 0, 1) to the normal
     vec3 axis = vec3(hit_normal.y, -hit_normal.x, 0);
-    if (length(axis) < 0.0001) {
-        ray_info.brdf_d = wi;
-    } else {
-        float cos_t = hit_normal.z;
-        float sin_t = length(axis);
-        vec3 r = normalize(axis);
-        ray_info.brdf_d =
-            wi * cos_t
-            + cross(wi, r) * sin_t
-            + r * dot(r, wi) * (1 - cos_t);
-    }
+    float cos_t = hit_normal.z;
+    float sin_t = length(axis);
+    vec3 r = normalize(axis);
+    ray_info.brdf_d =
+        wi * cos_t
+        + cross(wi, r) * sin_t
+        + r * dot(r, wi) * (1 - cos_t);
 }
 
 vec3 eval_brdf(vec3 wi, vec3 hit_normal) {
-    //return vec3(dot(wi, hit_normal) / PI);
     uint brdf_i = offsets.offsets[gl_InstanceID].brdf_i;
     BrdfParams brdf = instance_info.params[brdf_i];
     return brdf.albedo;
 }
 
 void sample_emitter(vec3 hit_pos, vec3 hit_normal) {
-    // pick a random emitter
-    uint light_i = uint(rnd(ray_info.seed) * lights.num_lights);
-
-    Light light = lights.lights[light_i];
-    if (light.type == EMITTER_TYPE_POINT) {
-        vec3 dir_to_light = normalize(light.position - hit_pos);
-        ray_info.emitter_o = light.position;
-        ray_info.emitter_pdf = 1.0 / lights.num_lights;
-        ray_info.emitter_brdf_vals = eval_brdf(dir_to_light, hit_normal);
-        ray_info.emitter_normal = -dir_to_light;
-        ray_info.rad = light.color;
-    } else if (light.type == EMITTER_TYPE_AREA) {
-        // sample random point on triangle 
-        float s = rnd(ray_info.seed);
-        float t = sqrt(rnd(ray_info.seed));
-
-        float a = 1 - t;
-        float b = (1 - s) * t;
-        float c = s * t;
-
-        vec3 ab = light.vertices[1] - light.vertices[0];
-        vec3 ac = light.vertices[2] - light.vertices[0];
-        vec3 normal = cross(ab, ac);
-        float area = length(normal) / 2;
-        normal = normalize(normal);
-
-        ray_info.emitter_o =
-            a * light.vertices[0] + b * light.vertices[1] + c * light.vertices[2];
-        vec3 dir_to_light = normalize(ray_info.emitter_o - hit_pos);
-        ray_info.emitter_pdf = 1.0 / lights.num_lights / area;
-        ray_info.emitter_brdf_vals = eval_brdf(dir_to_light, hit_normal);
-        ray_info.emitter_normal = normal;
-        ray_info.rad = light.color;
-
-        //debugPrintfEXT("%u", lights.num_lights);
-    }
+    ray_info.rad = vec3(0);
 }
 
 void main() {
@@ -145,5 +96,5 @@ void main() {
     ray_info.hit_normal = hit_normal;
     ray_info.is_hit = true;
     ray_info.is_emitter = false;
-    ray_info.is_specular = false;
+    ray_info.is_specular = true;
 }

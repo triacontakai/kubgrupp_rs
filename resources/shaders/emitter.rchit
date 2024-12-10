@@ -17,5 +17,7 @@ layout(scalar, set = 0, binding = 4) readonly buffer Lights {
 } lights;
 
 void main() {
+    ray_info.is_hit = true;
+    ray_info.is_emitter = true;
     ray_info.rad = lights.lights[nonuniformEXT(gl_InstanceCustomIndexEXT)].color;
 }

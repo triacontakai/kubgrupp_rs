@@ -1,11 +1,11 @@
 struct RayPayload {
     // inputs
-    vec2 pixel;
     uint seed;
 
     // outputs
     bool is_hit;
     bool is_emitter;
+    bool is_specular;
     vec3 rad;
     vec3 hit_pos;
     vec3 hit_normal;

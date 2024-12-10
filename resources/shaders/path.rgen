@@ -11,6 +11,7 @@
 layout(location = 0) rayPayloadEXT RayPayload ray_info;
 
 layout(set = 0, binding = 0) writeonly uniform image2D image;
+layout(set = 0, binding = 1, rgba32f) uniform image2D accum_image;
 layout(set = 0, binding = 2) uniform accelerationStructureEXT topLevelAS;
 layout(push_constant) uniform Cameras {
     mat4 viewInverse;
@@ -19,7 +20,7 @@ layout(push_constant) uniform Cameras {
     uint frame;
 };
 
-const uint MAX_DEPTH = 1;
+const uint MAX_DEPTH = 8;
 
 vec3 toneMap(in vec3 rgb, float limit) {
     float luminance = 0.299 * rgb.x + 0.587 * rgb.y + 0.114 * rgb.z;
@@ -33,7 +34,8 @@ vec3 gammaCorrection(in vec3 ldr)
 
 void main() {
     ray_info.seed = tea(gl_LaunchIDEXT.xy + frame * gl_LaunchSizeEXT.xy + seed_offset);
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    vec2 jitter = vec2(rnd(ray_info.seed), rnd(ray_info.seed));
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + jitter;
     const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
 
     vec2 d = inUV * 2.0 - 1.0;
@@ -47,6 +49,8 @@ void main() {
 
     vec3 result = vec3(0);
     vec3 throughput = vec3(1);
+
+    bool specular_reflection = true;
 
     for (uint depth = 1; depth <= MAX_DEPTH; depth++) {
         uint rayFlags = gl_RayFlagsOpaqueEXT;
@@ -72,7 +76,7 @@ void main() {
             break;
 
         // emitter hits terminate paths
-        if (ray_info.is_emitter && depth == 1) {
+        if (ray_info.is_emitter && specular_reflection) {
             result += throughput * ray_info.rad;
             break;
         }
@@ -95,6 +99,7 @@ void main() {
         float emitter_pdf = ray_info.emitter_pdf;
         vec3 emitter_rad = ray_info.rad;
         vec3 dist_vec = emitter_o - obj_pos;
+        specular_reflection = ray_info.is_specular;
 
         // emitter sample from hit point
         // we trace from emitter_o to hit_pos to account for point lights
@@ -114,7 +119,7 @@ void main() {
 
         // check whether hit was on obj_hit_pos to calculate geometry term
         float hit_dist = length(ray_info.hit_pos - obj_pos);
-        float v = float(hit_dist < 0.0001);
+        float v = float(hit_dist < 0.00001);
         vec3 emitter_to_hit = normalize(dist_vec);
         float emitter_dist = dot(dist_vec, dist_vec);
         float cos_em = abs(dot(emitter_normal, emitter_to_hit));
@@ -127,13 +132,20 @@ void main() {
             * emitter_brdf_vals
             / emitter_pdf;
 
-        throughput *= ray_info.brdf_vals;
-        //debugPrintfEXT("%f", emitter_pdf);
+        throughput *= brdf_vals;
+
+        //if (depth == 1) {
+        //    debugPrintfEXT("%v3f", ray_d);
+        //}
     }
 
     //result = toneMap(result, 1.5);
     //result = gammaCorrection(result);
 
+    vec3 rad = frame > 0 ? imageLoad(accum_image, ivec2(gl_LaunchIDEXT.xy)).rgb : vec3(0);
+    rad += result;
+    imageStore(accum_image, ivec2(gl_LaunchIDEXT.xy), vec4(rad, 1.0));
 
+    result = rad / (frame + 1.0);
     imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(result, 1.0));
 }
