@@ -13,7 +13,7 @@
 layout(location = 0) rayPayloadEXT RayPayload ray_info;
 
 const uint MAX_DEPTH = 8;
-const uint SPP = 8;
+const uint SPP = 4;
 
 float power_heuristic(float a, float b) {
     float t = a * a;
@@ -69,14 +69,14 @@ void main() {
             // emitter hits terminate paths
             if (ray_info.is_emitter) {
                 if (specular_reflection) {
+                    result += throughput * ray_info.rad;
+                } else {
 #ifdef MIS
                     vec3 dist_vec = ray_info.emitter_o - ray_info.hit_pos;
                     float dist_sq = dot(dist_vec, dist_vec);
                     float emitter_pdf = ray_info.emitter_pdf * dist_sq / abs(dot(ray_info.emitter_normal, ray_d));
                     float mis_weight = depth > 0 ? power_heuristic(ray_info.brdf_pdf, emitter_pdf) : 1.0;
                     result += throughput * mis_weight * ray_info.rad;
-#else
-                    result += throughput * ray_info.rad;
 #endif
                 }
                 break;
@@ -158,11 +158,11 @@ void main() {
 
     result = rad / (frame + 1.0);
 
-    if (max(max(result.r, result.g), result.b) < 0.0031308) {
-        result *= 12.92;
-    } else {
-        result = 1.055 * pow(result, vec3(1.0 / 2.4)) - 0.055;
-    }
+    //if (max(max(result.r, result.g), result.b) < 0.0031308) {
+    //    result *= 12.92;
+    //} else {
+    //    result = 1.055 * pow(result, vec3(1.0 / 2.4)) - 0.055;
+    //}
 
     imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(result, 1.0));
 }

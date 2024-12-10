@@ -109,8 +109,8 @@ translate 3 -1 0.5
 '''
 #brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.8]]}
 #brdf = {name = "mirror", fields = []}
-#brdf = {name = "dielectric", fields = [1.5]}
-brdf = {name = "microfacet", fields = [[0.8, 0.5, 0.5], 1.8, 0.3]}
+brdf = {name = "dielectric", fields = [2.0]}
+#brdf = {name = "microfacet", fields = [[0.8, 0.5, 0.5], 1.8, 0.3]}
 
 [[object]]
 mesh = "square.obj"
