@@ -49,7 +49,8 @@ pub struct RaytraceRenderer {
     offset_buffer: Option<AllocatedBuffer>,
     brdf_param_buffer: Option<AllocatedBuffer>,
     command_buffers: Vec<vk::CommandBuffer>,
-    camera_data: [u8; 128],
+    push_data: [u8; 128 + 8 + 4],
+    current_frame: u32,
 }
 
 impl RaytraceRenderer {
@@ -426,7 +427,7 @@ impl RaytraceRenderer {
         let push_constant_range = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
             offset: 0,
-            size: 128,
+            size: std::mem::size_of_val(&self.push_data) as u32,
         };
         let layout_create_info = vk::PipelineLayoutCreateInfo {
             p_set_layouts: descriptor_set_layouts.as_ptr(),
@@ -903,7 +904,7 @@ impl RaytraceRenderer {
                 self.pipeline_layout,
                 vk::ShaderStageFlags::RAYGEN_KHR,
                 0,
-                &self.camera_data,
+                &self.push_data,
             );
 
             self.rt_pipeline_device.cmd_trace_rays(
@@ -1086,7 +1087,8 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             offset_buffer: Default::default(),
             brdf_param_buffer: Default::default(),
             command_buffers: Default::default(),
-            camera_data: [0; 128],
+            push_data: [0; 128 + 8 + 4],
+            current_frame: 0,
         })
     }
 
@@ -1205,8 +1207,8 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         let proj_inverse_cols = scene.camera.perspective.inverse().to_cols_array();
         let view_bytes: &[u8] = bytemuck::cast_slice(&view_inverse_cols);
         let proj_bytes: &[u8] = bytemuck::cast_slice(&proj_inverse_cols);
-        self.camera_data[0..64].copy_from_slice(view_bytes);
-        self.camera_data[64..128].copy_from_slice(proj_bytes);
+        self.push_data[0..64].copy_from_slice(view_bytes);
+        self.push_data[64..128].copy_from_slice(proj_bytes);
 
         let mut writes = Vec::new();
 
@@ -1287,7 +1289,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
                 MeshSceneUpdate::NewView(view) => {
                     let view_inverse_cols = view.inverse().to_cols_array();
                     let view_bytes: &[u8] = bytemuck::cast_slice(&view_inverse_cols);
-                    self.camera_data[0..64].copy_from_slice(view_bytes);
+                    self.push_data[0..64].copy_from_slice(view_bytes);
                 }
                 MeshSceneUpdate::NewSize((width, height, projection)) => unsafe {
                     self.device.device_wait_idle()?;
@@ -1324,10 +1326,16 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
 
                     let projection_inverse_cols = projection.inverse().to_cols_array();
                     let projection_bytes: &[u8] = bytemuck::cast_slice(&projection_inverse_cols);
-                    self.camera_data[64..128].copy_from_slice(projection_bytes);
+                    self.push_data[64..128].copy_from_slice(projection_bytes);
                 },
             }
         }
+
+        let r: (u32, u32) = rand::random();
+        self.push_data[128..128 + 8].copy_from_slice(bytemuck::cast_slice(&[r.0, r.1]));
+
+        self.push_data[128 + 8..128 + 8 + 4]
+            .copy_from_slice(bytemuck::cast_slice(&[self.current_frame]));
 
         let (image, image_index) = target.acquire_next_image()?;
 
