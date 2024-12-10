@@ -1,5 +1,5 @@
 [global_shaders]
-raygen = "path.rgen"
+raygen = "simple.rgen"
 miss = "black.rmiss"
 emitter_hit = "emitter.rchit"
 

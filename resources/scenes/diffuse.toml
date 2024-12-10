@@ -46,6 +46,26 @@ chit_shader = "mirror.rchit"
 field = []
 
 [[brdf]]
+name = "dielectric"
+chit_shader = "dielectric.rchit"
+[[brdf.field]]
+name = "ior"
+type = "float"
+
+[[brdf]]
+name = "microfacet"
+chit_shader = "microfacet.rchit"
+[[brdf.field]]
+name = "albedo"
+type = "vec3"
+[[brdf.field]]
+name = "ior"
+type = "float"
+[[brdf.field]]
+name = "roughness"
+type = "float"
+
+[[brdf]]
 name = "checkerboard"
 chit_shader = "checkerboard.rchit"
 [[brdf.field]]
@@ -88,7 +108,9 @@ scale .5 .5 .5
 translate 3 -1 0.5
 '''
 #brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.8]]}
-brdf = {name = "mirror", fields = []}
+#brdf = {name = "mirror", fields = []}
+#brdf = {name = "dielectric", fields = [1.5]}
+brdf = {name = "microfacet", fields = [[0.8, 0.5, 0.5], 1.8, 0.3]}
 
 [[object]]
 mesh = "square.obj"

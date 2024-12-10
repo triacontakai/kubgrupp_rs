@@ -1,3 +1,5 @@
+const float PI = 3.1415926535897932384626433832795;
+
 struct RayPayload {
     // inputs
     uint seed;
@@ -18,8 +20,4 @@ struct RayPayload {
     float emitter_pdf;
     vec3 emitter_brdf_vals;
     vec3 emitter_normal;
-    
-    // TODO: add fields for MIS
 };
-
-const float PI = 3.1415926535897932384626433832795;

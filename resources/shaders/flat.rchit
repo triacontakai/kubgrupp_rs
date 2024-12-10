@@ -3,29 +3,19 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_ray_tracing : enable
-#extension GL_EXT_scalar_block_layout : enable
-#extension GL_EXT_debug_printf : enable
 
-#include "raycommon.glsl"
-#include "hitcommon.glsl"
-
-struct BrdfParams {
-    vec3 albedo;
-};
+#include "ray_common.glsl"
+#include "hit_common.glsl"
 
 layout(location = 0) rayPayloadInEXT RayPayload ray_info;
 
 hitAttributeEXT vec2 bary_coord;
 
-layout(scalar, set = 0, binding = 3) readonly buffer Vertices {
-    Vertex vertices[];
-} vertices;
+struct BrdfParams {
+    vec3 albedo;
+};
 
-layout(scalar, set = 0, binding = 5) readonly buffer InstanceOffsets {
-    Offsets offsets[];
-} offsets;
-
-layout(scalar, set = 0, binding = 6) readonly buffer Fields {
+layout(scalar, set = 0, binding = BRDF_PARAMS_BINDING) readonly buffer Fields {
     BrdfParams params[];
 } instance_info;
 

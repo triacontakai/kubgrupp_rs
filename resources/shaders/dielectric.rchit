@@ -7,16 +7,42 @@
 #include "ray_common.glsl"
 #include "hit_common.glsl"
 #include "random.glsl"
+#include "sampling.glsl"
 
 layout(location = 0) rayPayloadInEXT RayPayload ray_info;
 
 hitAttributeEXT vec2 bary_coord;
 
+struct BrdfParams {
+    float ior;
+};
+
+layout(scalar, set = 0, binding = BRDF_PARAMS_BINDING) readonly buffer Fields {
+    BrdfParams params[];
+} instance_info;
+
 void sample_brdf(vec3 hit_normal) {
     ray_info.brdf_vals = vec3(1);
-    ray_info.brdf_pdf = 0;
+    ray_info.brdf_pdf = 1;
 
-    ray_info.brdf_d = reflect(gl_WorldRayDirectionEXT, hit_normal);
+    uint brdf_i = offsets.offsets[gl_InstanceID].brdf_i;
+    BrdfParams brdf = instance_info.params[brdf_i];
+
+    float eta = 1.0 / brdf.ior;
+    if (dot(hit_normal, -gl_WorldRayDirectionEXT) < 0.0) {
+        hit_normal = -hit_normal;
+        eta = brdf.ior;
+    }
+
+    vec3 reflected = reflect(gl_WorldRayDirectionEXT, hit_normal);
+    float f = fresnel(abs(dot(reflected, hit_normal)), eta);
+
+    float r = rnd(ray_info.seed);
+    if (r < f) {
+        ray_info.brdf_d = normalize(reflected);
+    } else {
+        ray_info.brdf_d = normalize(refract(gl_WorldRayDirectionEXT, hit_normal, eta));
+    }
 }
 
 void sample_emitter(vec3 hit_pos, vec3 hit_normal) {

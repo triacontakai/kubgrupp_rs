@@ -1,146 +1,162 @@
 #version 460
 
 #extension GL_GOOGLE_include_directive : enable
-#extension GL_EXT_debug_printf : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_ray_tracing : enable
 
-#include "raycommon.glsl"
+#include "ray_common.glsl"
+#include "raygen_common.glsl"
 #include "random.glsl"
+
+#define MIS
 
 layout(location = 0) rayPayloadEXT RayPayload ray_info;
 
-layout(set = 0, binding = 0) writeonly uniform image2D image;
-layout(set = 0, binding = 1, rgba32f) uniform image2D accum_image;
-layout(set = 0, binding = 2) uniform accelerationStructureEXT topLevelAS;
-layout(push_constant) uniform Cameras {
-    mat4 viewInverse;
-    mat4 projInverse;
-    uvec2 seed_offset;
-    uint frame;
-};
-
 const uint MAX_DEPTH = 8;
+const uint SPP = 8;
 
-vec3 toneMap(in vec3 rgb, float limit) {
-    float luminance = 0.299 * rgb.x + 0.587 * rgb.y + 0.114 * rgb.z;
-    return rgb / (1.0 + luminance / limit);
-}
-
-vec3 gammaCorrection(in vec3 ldr)
-{
-        return pow(ldr, vec3(1.0 / 2.2));
+float power_heuristic(float a, float b) {
+    float t = a * a;
+    return t / (b * b + t);
 }
 
 void main() {
     ray_info.seed = tea(gl_LaunchIDEXT.xy + frame * gl_LaunchSizeEXT.xy + seed_offset);
-    vec2 jitter = vec2(rnd(ray_info.seed), rnd(ray_info.seed));
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + jitter;
-    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
 
-    vec2 d = inUV * 2.0 - 1.0;
-
-    vec4 origin = viewInverse * vec4(0, 0, 0, 1);
-    vec4 target = projInverse * vec4(d.x, d.y, 1, 1);
-    vec4 direction = viewInverse * vec4(normalize(target.xyz), 0);
-
-    vec3 ray_o = origin.xyz;
-    vec3 ray_d = direction.xyz;
-
+    const uint ray_flags = gl_RayFlagsOpaqueEXT;
+    const float t_min = 0.001;
+    const float t_max = 1000.0;
+ 
     vec3 result = vec3(0);
-    vec3 throughput = vec3(1);
 
-    bool specular_reflection = true;
+    for (uint i = 0; i < SPP; i++) {
+        vec2 jitter = vec2(rnd(ray_info.seed), rnd(ray_info.seed));
+        const vec2 pixel_center = vec2(gl_LaunchIDEXT.xy) + jitter;
+        const vec2 in_uv = pixel_center / vec2(gl_LaunchSizeEXT.xy);
 
-    for (uint depth = 1; depth <= MAX_DEPTH; depth++) {
-        uint rayFlags = gl_RayFlagsOpaqueEXT;
-        float tMin = 0.001;
-        float tMax = 1000.0;
+        vec2 d = in_uv * 2.0 - 1.0;
 
-        traceRayEXT(
-            topLevelAS,
-            rayFlags,
-            0xFF,
-            0,
-            0,
-            0,
-            ray_o,
-            tMin,
-            ray_d,
-            tMax,
-            0
-        );
+        vec4 origin = view_inverse * vec4(0, 0, 0, 1);
+        vec4 target = proj_inverse * vec4(d.x, d.y, 1, 1);
+        vec4 direction = view_inverse * vec4(normalize(target.xyz), 0);
 
-        // ignore misses
-        if (!ray_info.is_hit)
-            break;
+        vec3 ray_o = origin.xyz;
+        vec3 ray_d = direction.xyz;
 
-        // emitter hits terminate paths
-        if (ray_info.is_emitter && specular_reflection) {
-            result += throughput * ray_info.rad;
-            break;
-        }
+        vec3 throughput = vec3(1);
 
-        // at this point we know ray hit an object
-        // we then want to sample emitters to actualy add to result
-        // our shaders do this for us, so all we need
-        // to do is use this result
+        bool specular_reflection = true;
 
-        // next ray will be traced in direction of brdf sample
-        // save this since ray_info will be overwritten by emitter hit check
-        ray_o = ray_info.hit_pos;
-        ray_d = ray_info.brdf_d;
-        vec3 obj_pos = ray_info.hit_pos;
-        vec3 obj_normal = ray_info.hit_normal;
-        vec3 brdf_vals = ray_info.brdf_vals;
-        vec3 emitter_brdf_vals = ray_info.emitter_brdf_vals;
-        vec3 emitter_normal = ray_info.emitter_normal;
-        vec3 emitter_o = ray_info.emitter_o;
-        float emitter_pdf = ray_info.emitter_pdf;
-        vec3 emitter_rad = ray_info.rad;
-        vec3 dist_vec = emitter_o - obj_pos;
-        specular_reflection = ray_info.is_specular;
-
-        // emitter sample from hit point
-        // we trace from emitter_o to hit_pos to account for point lights
-        if (!specular_reflection) {
+        for (uint depth = 0; depth < MAX_DEPTH; depth++) {
             traceRayEXT(
-                topLevelAS,
-                rayFlags,
+                tlas,
+                ray_flags,
                 0xFF,
                 0,
                 0,
                 0,
-                emitter_o,
-                tMin,
-                normalize(obj_pos - emitter_o),
-                tMax,
+                ray_o,
+                t_min,
+                ray_d,
+                t_max,
                 0
             );
 
-            // check whether hit was on obj_hit_pos to calculate geometry term
-            float hit_dist = length(ray_info.hit_pos - obj_pos);
-            float v = float(hit_dist < 0.00001);
-            vec3 emitter_to_hit = normalize(dist_vec);
-            float emitter_dist = dot(dist_vec, dist_vec);
-            float cos_em = abs(dot(emitter_normal, emitter_to_hit));
-            float cos_obj = abs(dot(obj_normal, emitter_to_hit));
-            float g = cos_obj * cos_em / emitter_dist;
-            result +=
-                throughput
-                * g * v
-                * emitter_rad
-                * emitter_brdf_vals
-                / emitter_pdf;
-        }
+            // ignore misses
+            if (!ray_info.is_hit)
+                break;
 
-        throughput *= brdf_vals;
+            // emitter hits terminate paths
+            if (ray_info.is_emitter) {
+                if (specular_reflection) {
+#ifdef MIS
+                    vec3 dist_vec = ray_info.emitter_o - ray_info.hit_pos;
+                    float dist_sq = dot(dist_vec, dist_vec);
+                    float emitter_pdf = ray_info.emitter_pdf * dist_sq / abs(dot(ray_info.emitter_normal, ray_d));
+                    float mis_weight = depth > 0 ? power_heuristic(ray_info.brdf_pdf, emitter_pdf) : 0.0;
+                    result += throughput * mis_weight * ray_info.rad;
+#else
+                    result += throughput * ray_info.rad;
+#endif
+                }
+                break;
+            }
+
+            // at this point we know ray hit an object
+            // we then want to sample emitters to actualy add to result
+            // our shaders do this for us, so all we need
+            // to do is use this result
+
+            // next ray will be traced in direction of brdf sample
+            // save this since ray_info will be overwritten by emitter hit check
+            ray_o = ray_info.hit_pos;
+            ray_d = ray_info.brdf_d;
+            vec3 obj_pos = ray_info.hit_pos;
+            vec3 obj_normal = ray_info.hit_normal;
+            vec3 brdf_vals = ray_info.brdf_vals;
+            vec3 emitter_brdf_vals = ray_info.emitter_brdf_vals;
+            vec3 emitter_normal = ray_info.emitter_normal;
+            vec3 emitter_o = ray_info.emitter_o;
+            float emitter_pdf = ray_info.emitter_pdf;
+            vec3 emitter_rad = ray_info.rad;
+            vec3 dist_vec = emitter_o - obj_pos;
+            specular_reflection = ray_info.is_specular;
+
+            // emitter sample from hit point
+            // we trace from emitter_o to hit_pos to account for point lights
+            if (!specular_reflection) {
+                traceRayEXT(
+                    tlas,
+                    ray_flags,
+                    0xFF,
+                    0,
+                    0,
+                    0,
+                    emitter_o,
+                    t_min,
+                    normalize(obj_pos - emitter_o),
+                    t_max,
+                    0
+                );
+
+                // check whether hit was on obj_hit_pos to calculate geometry term
+                float hit_dist = length(ray_info.hit_pos - obj_pos);
+                float v = float(hit_dist < 0.00001);
+                vec3 emitter_to_hit = normalize(dist_vec);
+                float emitter_dist = dot(dist_vec, dist_vec);
+                float cos_em = abs(dot(emitter_normal, emitter_to_hit));
+                float cos_obj = abs(dot(obj_normal, emitter_to_hit));
+                float g = cos_obj * cos_em / emitter_dist;
+#ifdef MIS
+                float converted_pdf = emitter_pdf * emitter_dist / cos_em;
+                float mis_weight = power_heuristic(converted_pdf, ray_info.brdf_pdf);
+                result +=
+                    throughput
+                    * mis_weight
+                    * g * v
+                    * emitter_rad
+                    * emitter_brdf_vals
+                    / emitter_pdf;
+#else
+                result +=
+                    throughput
+                    * g * v
+                    * emitter_rad
+                    * emitter_brdf_vals
+                    / emitter_pdf;
+#endif
+            }
+
+            throughput *= brdf_vals;
+        }
     }
+    result /= float(SPP);
 
     vec3 rad = frame > 0 ? imageLoad(accum_image, ivec2(gl_LaunchIDEXT.xy)).rgb : vec3(0);
     rad += result;
     imageStore(accum_image, ivec2(gl_LaunchIDEXT.xy), vec4(rad, 1.0));
 
     result = rad / (frame + 1.0);
+
     imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(result, 1.0));
 }
