@@ -1289,6 +1289,8 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
 
         target.present(self.compute_queue)?;
 
+        self.current_frame += 1;
+
         Ok(())
     }
 

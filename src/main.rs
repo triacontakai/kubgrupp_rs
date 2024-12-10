@@ -104,7 +104,7 @@ where
         });
 
         let validation_feature_enable = [
-            // vk::ValidationFeatureEnableEXT::DEBUG_PRINTF,
+            vk::ValidationFeatureEnableEXT::DEBUG_PRINTF,
             vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
             vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
         ];
