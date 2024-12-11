@@ -836,7 +836,7 @@ impl RaytraceRenderer {
                     src_offsets: [
                         vk::Offset3D { x: 0, y: 0, z: 0 },
                         vk::Offset3D {
-                            x: self.storage_image.as_ref().unwrap().height as i32,
+                            x: self.storage_image.as_ref().unwrap().width as i32,
                             y: self.storage_image.as_ref().unwrap().height as i32,
                             z: 1,
                         },
