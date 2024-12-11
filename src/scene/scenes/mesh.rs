@@ -132,12 +132,6 @@ impl Shader {
 }
 
 impl MeshScene {
-    pub fn on_resize(&mut self, width: u32, height: u32) -> Mat4 {
-        self.camera.handle_resize(width, height);
-
-        self.camera.perspective()
-    }
-
     pub fn load_from(mut reader: impl Read) -> Result<Self> {
         let mut toml_conf = String::new();
         reader.read_to_string(&mut toml_conf)?;

@@ -99,7 +99,7 @@ where
         });
 
         let validation_feature_enable = [
-            vk::ValidationFeatureEnableEXT::DEBUG_PRINTF,
+            // vk::ValidationFeatureEnableEXT::DEBUG_PRINTF,
             vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
             vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
         ];
@@ -492,8 +492,8 @@ where
                 }
 
                 if let Some((w, h)) = self.pending_resize {
-                    let proj = self.scene.on_resize(w, h);
-                    updates.push(MeshSceneUpdate::NewSize((w, h, proj)));
+                    self.scene.camera.handle_resize(w, h);
+                    updates.push(MeshSceneUpdate::NewSize((w, h, self.scene.camera.perspective())));
 
                     self.pending_resize = None;
                 }
