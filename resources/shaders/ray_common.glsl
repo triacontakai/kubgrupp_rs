@@ -18,6 +18,7 @@ struct RayPayload {
 
     vec3 emitter_o;
     float emitter_pdf;
+    float emitter_brdf_pdf;
     vec3 emitter_brdf_vals;
     vec3 emitter_normal;
 };

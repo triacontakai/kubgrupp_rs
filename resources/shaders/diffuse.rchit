@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_debug_printf : enable
 
 #include "ray_common.glsl"
 #include "hit_common.glsl"
@@ -35,10 +36,11 @@ void sample_brdf(vec3 hit_normal) {
     ray_info.brdf_d = frame_sample(wi, hit_normal);
 }
 
-vec3 eval_brdf(vec3 wi, vec3 hit_normal) {
+vec4 eval_brdf(vec3 wi, vec3 hit_normal) {
     uint brdf_i = offsets.offsets[gl_InstanceID].brdf_i;
     BrdfParams brdf = instance_info.params[brdf_i];
-    return brdf.albedo;
+    float pdf = abs(dot(wi, hit_normal)) / PI;
+    return vec4(brdf.albedo, pdf);
 }
 
 void sample_emitter(vec3 hit_pos, vec3 hit_normal) {
@@ -48,9 +50,11 @@ void sample_emitter(vec3 hit_pos, vec3 hit_normal) {
     Light light = lights.lights[light_i];
     if (light.type == EMITTER_TYPE_POINT) {
         vec3 dir_to_light = normalize(light.position - hit_pos);
+        vec4 brdf_eval = eval_brdf(dir_to_light, hit_normal);
         ray_info.emitter_o = light.position;
         ray_info.emitter_pdf = 1.0 / lights.num_lights;
-        ray_info.emitter_brdf_vals = eval_brdf(dir_to_light, hit_normal);
+        ray_info.emitter_brdf_vals = brdf_eval.xyz;
+        ray_info.emitter_brdf_pdf = brdf_eval.w;
         ray_info.emitter_normal = -dir_to_light;
         ray_info.rad = light.color;
     } else if (light.type == EMITTER_TYPE_AREA) {
@@ -70,9 +74,13 @@ void sample_emitter(vec3 hit_pos, vec3 hit_normal) {
 
         ray_info.emitter_o =
             a * light.vertices[0] + b * light.vertices[1] + c * light.vertices[2];
+
         vec3 dir_to_light = normalize(ray_info.emitter_o - hit_pos);
+        vec4 brdf_eval = eval_brdf(dir_to_light, hit_normal);
+
         ray_info.emitter_pdf = 1.0 / lights.num_lights / area;
-        ray_info.emitter_brdf_vals = eval_brdf(dir_to_light, hit_normal);
+        ray_info.emitter_brdf_vals = brdf_eval.xyz;
+        ray_info.emitter_brdf_pdf = brdf_eval.w;
         ray_info.emitter_normal = normal;
         ray_info.rad = light.color;
     }

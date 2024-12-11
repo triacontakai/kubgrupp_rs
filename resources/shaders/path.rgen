@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_debug_printf : enable
 
 #include "ray_common.glsl"
 #include "raygen_common.glsl"
@@ -18,6 +19,7 @@ const uint SPP = 4;
 float power_heuristic(float a, float b) {
     float t = a * a;
     return t / (b * b + t);
+    //return a / (a + b);
 }
 
 void main() {
@@ -44,6 +46,7 @@ void main() {
         vec3 ray_d = direction.xyz;
 
         vec3 throughput = vec3(1);
+        float prev_brdf_pdf;
 
         bool specular_reflection = true;
 
@@ -72,10 +75,11 @@ void main() {
                     result += throughput * ray_info.rad;
                 } else {
 #ifdef MIS
-                    vec3 dist_vec = ray_info.emitter_o - ray_info.hit_pos;
+                    vec3 dist_vec = ray_info.hit_pos - ray_o;
                     float dist_sq = dot(dist_vec, dist_vec);
-                    float emitter_pdf = ray_info.emitter_pdf * dist_sq / abs(dot(ray_info.emitter_normal, ray_d));
-                    float mis_weight = depth > 0 ? power_heuristic(ray_info.brdf_pdf, emitter_pdf) : 1.0;
+                    float emitter_pdf = ray_info.emitter_pdf * dist_sq / abs(dot(ray_info.hit_normal, ray_d));
+                    float mis_weight = power_heuristic(prev_brdf_pdf, emitter_pdf);
+                    //result += throughput * mis_weight * ray_info.rad / dist_sq;
                     result += throughput * mis_weight * ray_info.rad;
 #endif
                 }
@@ -98,9 +102,11 @@ void main() {
             vec3 emitter_normal = ray_info.emitter_normal;
             vec3 emitter_o = ray_info.emitter_o;
             float emitter_pdf = ray_info.emitter_pdf;
+            float emitter_brdf_pdf = ray_info.emitter_brdf_pdf;
             vec3 emitter_rad = ray_info.rad;
             vec3 dist_vec = emitter_o - obj_pos;
             specular_reflection = ray_info.is_specular;
+            prev_brdf_pdf = ray_info.brdf_pdf;
 
             // emitter sample from hit point
             // we trace from emitter_o to hit_pos to account for point lights
@@ -125,11 +131,13 @@ void main() {
                 vec3 emitter_to_hit = normalize(dist_vec);
                 float emitter_dist = dot(dist_vec, dist_vec);
                 float cos_em = abs(dot(emitter_normal, emitter_to_hit));
-                float cos_obj = abs(dot(obj_normal, emitter_to_hit));
+                float cos_obj = abs(dot(obj_normal, -emitter_to_hit));
                 float g = cos_obj * cos_em / emitter_dist;
+                //float g = cos_em / emitter_dist;
+                //float g = cos_obj * cos_em ;
 #ifdef MIS
                 float converted_pdf = emitter_pdf * emitter_dist / cos_em;
-                float mis_weight = power_heuristic(converted_pdf, ray_info.brdf_pdf);
+                float mis_weight = power_heuristic(converted_pdf, emitter_brdf_pdf);
                 result +=
                     throughput
                     * mis_weight

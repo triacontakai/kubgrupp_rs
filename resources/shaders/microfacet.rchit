@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_debug_printf : enable
 
 #include "ray_common.glsl"
 #include "hit_common.glsl"
@@ -31,20 +32,23 @@ float g1(vec3 wv, vec3 wh, vec3 hit_normal, float roughness) {
     return dot(wv, wh) / cos_t > 0 ? val : 0.0;
 }
 
-vec3 eval_brdf(vec3 wi, vec3 hit_normal, float ks) {
+vec4 eval_brdf(vec3 wi, vec3 hit_normal, float ks) {
     uint brdf_i = offsets.offsets[gl_InstanceID].brdf_i;
     BrdfParams brdf = instance_info.params[brdf_i];
 
     vec3 wh = normalize(wi - gl_WorldRayDirectionEXT);
     float g = g1(wi, wh, hit_normal, brdf.roughness) * g1(-gl_WorldRayDirectionEXT, wh, hit_normal, brdf.roughness);
-    float f = fresnel(dot(wh, -gl_WorldRayDirectionEXT), brdf.ior);
+    float f = fresnel(dot(wh, -gl_WorldRayDirectionEXT), 1/brdf.ior);
 
     float cos_wh = dot(wh, hit_normal);
     float cos_wi = dot(wi, hit_normal);
     float cos_wo = dot(-gl_WorldRayDirectionEXT, hit_normal);
 
     float d = pdf_beckmann(cos_wh, brdf.roughness);
-    return brdf.albedo / PI + ks * d * f * g / (4 * cos_wi * cos_wo * cos_wh);
+    float jh = 1 / (4 * dot(wh, wi));
+    float pdf = ks * d * jh + (1 - ks) * cos_wi / PI;
+    vec3 vals = brdf.albedo / PI + ks * d * f * g / (4 * cos_wi * cos_wo * cos_wh);
+    return vec4(vals, pdf);
 }
 
 void sample_brdf(vec3 hit_normal, float ks) {
@@ -63,12 +67,18 @@ void sample_brdf(vec3 hit_normal, float ks) {
         ray_info.brdf_d = frame_sample(cos_sample.xyz, hit_normal);
     }
 
-    vec3 wh = normalize(ray_info.brdf_d - gl_WorldRayDirectionEXT);
-    float jh = 1 / (4 * dot(wh, ray_info.brdf_d));
-    float d = pdf_beckmann(dot(wh, hit_normal), brdf.roughness);
+    //vec3 wh = normalize(ray_info.brdf_d - gl_WorldRayDirectionEXT);
+    //float jh = 1 / (4 * dot(wh, ray_info.brdf_d));
+    //float d = pdf_beckmann(dot(wh, hit_normal), brdf.roughness);
 
-    ray_info.brdf_pdf = ks * d * jh + (1 - ks) * cos_sample.w;
-    ray_info.brdf_vals = eval_brdf(ray_info.brdf_d, hit_normal, ks) * dot(ray_info.brdf_d, hit_normal);
+    //ray_info.brdf_pdf = ks * d * jh + (1 - ks) * cos_sample.w;
+    //ray_info.brdf_vals =
+    //    eval_brdf(ray_info.brdf_d, hit_normal, ks)
+    //    * dot(ray_info.brdf_d, hit_normal)
+    //    / ray_info.brdf_pdf;
+    vec4 brdf_eval = eval_brdf(ray_info.brdf_d, hit_normal, ks);
+    ray_info.brdf_pdf = brdf_eval.w;
+    ray_info.brdf_vals = brdf_eval.xyz * dot(ray_info.brdf_d, hit_normal) / brdf_eval.w;
 }
 
 void sample_emitter(vec3 hit_pos, vec3 hit_normal, float ks) {
@@ -80,7 +90,9 @@ void sample_emitter(vec3 hit_pos, vec3 hit_normal, float ks) {
         vec3 dir_to_light = normalize(light.position - hit_pos);
         ray_info.emitter_o = light.position;
         ray_info.emitter_pdf = 1.0 / lights.num_lights;
-        ray_info.emitter_brdf_vals = eval_brdf(dir_to_light, hit_normal, ks);
+        vec4 brdf_eval = eval_brdf(dir_to_light, hit_normal, ks);
+        ray_info.emitter_brdf_vals = brdf_eval.xyz;
+        ray_info.emitter_brdf_pdf = brdf_eval.w;
         ray_info.emitter_normal = -dir_to_light;
         ray_info.rad = light.color;
     } else if (light.type == EMITTER_TYPE_AREA) {
@@ -102,7 +114,9 @@ void sample_emitter(vec3 hit_pos, vec3 hit_normal, float ks) {
             a * light.vertices[0] + b * light.vertices[1] + c * light.vertices[2];
         vec3 dir_to_light = normalize(ray_info.emitter_o - hit_pos);
         ray_info.emitter_pdf = 1.0 / lights.num_lights / area;
-        ray_info.emitter_brdf_vals = eval_brdf(dir_to_light, hit_normal, ks);
+        vec4 brdf_eval = eval_brdf(dir_to_light, hit_normal, ks);
+        ray_info.emitter_brdf_vals = brdf_eval.xyz;
+        ray_info.emitter_brdf_pdf = brdf_eval.w;
         ray_info.emitter_normal = normal;
         ray_info.rad = light.color;
     }

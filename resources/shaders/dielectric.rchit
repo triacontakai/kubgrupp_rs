@@ -47,6 +47,8 @@ void sample_brdf(vec3 hit_normal) {
 
 void sample_emitter(vec3 hit_pos, vec3 hit_normal) {
     ray_info.rad = vec3(0);
+    ray_info.emitter_brdf_pdf = 1.0;
+    ray_info.emitter_pdf = 1.0;
 }
 
 void main() {

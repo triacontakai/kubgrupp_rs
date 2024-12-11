@@ -14,13 +14,15 @@ hitAttributeEXT vec2 bary_coord;
 
 void sample_brdf(vec3 hit_normal) {
     ray_info.brdf_vals = vec3(1);
-    ray_info.brdf_pdf = 0;
+    ray_info.brdf_pdf = 1.0;
 
     ray_info.brdf_d = reflect(gl_WorldRayDirectionEXT, hit_normal);
 }
 
 void sample_emitter(vec3 hit_pos, vec3 hit_normal) {
     ray_info.rad = vec3(0);
+    ray_info.emitter_brdf_pdf = 1.0;
+    ray_info.emitter_pdf = 1.0;
 }
 
 void main() {
