@@ -6,7 +6,7 @@ use winit::window::Window;
 
 use crate::{defer::Defer, utils};
 
-const MAX_FRAMES_IN_FLIGHT: u32 = 2;
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 pub struct WindowData {
     swapchain: vk::SwapchainKHR,
@@ -22,8 +22,8 @@ pub struct WindowData {
     current_image: u32,
 
     image_semaphores: Vec<vk::Semaphore>,
+    frame_fences: Vec<vk::Fence>,
     render_semaphores: Vec<vk::Semaphore>,
-    flight_fences: Vec<vk::Fence>,
     current_frame: usize,
 }
 
@@ -52,8 +52,9 @@ impl WindowData {
         let (swapchain, image_extent, images) =
             Self::create_swapchain(vk_lib, instance, device, physical_device, *surface, &window)?;
 
-        let (image_semaphores, render_semaphores, flight_fences) =
-            Self::create_sync_objects(device)?;
+        let image_count = images.len();
+        let (image_semaphores, frame_fences, render_semaphores) =
+            Self::create_sync_objects(device, image_count)?;
 
         let surface = surface.undefer();
         Ok(WindowData {
@@ -67,14 +68,14 @@ impl WindowData {
             images,
             current_image: 0,
             image_semaphores,
+            frame_fences,
             render_semaphores,
-            flight_fences,
             current_frame: 0,
         })
     }
 
     pub fn present(&mut self, queue: vk::Queue) -> Result<()> {
-        let render_semaphore = self.render_semaphores[self.current_frame];
+        let render_semaphore = self.render_semaphores[self.current_image as usize];
         let present_info = vk::PresentInfoKHR {
             wait_semaphore_count: 1,
             p_wait_semaphores: &raw const render_semaphore,
@@ -86,7 +87,7 @@ impl WindowData {
 
         unsafe { self.swapchain_loader.queue_present(queue, &present_info)? };
 
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT as usize;
+        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
         Ok(())
     }
@@ -94,21 +95,22 @@ impl WindowData {
     pub fn get_current_semaphores(&self) -> (vk::Semaphore, vk::Semaphore) {
         (
             self.image_semaphores[self.current_frame],
-            self.render_semaphores[self.current_frame],
+            self.render_semaphores[self.current_image as usize],
         )
     }
 
     pub fn get_current_flight_fence(&self) -> vk::Fence {
-        self.flight_fences[self.current_frame]
+        self.frame_fences[self.current_frame]
     }
 
     pub fn acquire_next_image(&mut self) -> Result<(vk::Image, u32)> {
+        let frame_fence = self.frame_fences[self.current_frame];
         let image_semaphore = self.image_semaphores[self.current_frame];
-        let flight_fence = self.flight_fences[self.current_frame];
 
         unsafe {
             self.device
-                .wait_for_fences(&[flight_fence], true, u64::MAX)?
+                .wait_for_fences(&[frame_fence], true, u64::MAX)?;
+            self.device.reset_fences(&[frame_fence])?;
         }
 
         (self.current_image, _) = unsafe {
@@ -119,8 +121,6 @@ impl WindowData {
                 vk::Fence::null(),
             )
         }?;
-
-        unsafe { self.device.reset_fences(&[flight_fence])? };
 
         Ok((self.images[self.current_image as usize], self.current_image))
     }
@@ -135,22 +135,19 @@ impl WindowData {
 
     fn create_sync_objects(
         device: &Device,
-    ) -> Result<(Vec<vk::Semaphore>, Vec<vk::Semaphore>, Vec<vk::Fence>)> {
+        swapchain_image_count: usize,
+    ) -> Result<(Vec<vk::Semaphore>, Vec<vk::Fence>, Vec<vk::Semaphore>)> {
         let mut image_semaphores = Vec::new();
+        let mut frame_fences = Vec::new();
         let mut render_semaphores = Vec::new();
-        let mut flight_fences = Vec::new();
+
         for _ in 0..MAX_FRAMES_IN_FLIGHT {
             let image_semaphore = {
                 let semaphore_info = vk::SemaphoreCreateInfo::default();
                 unsafe { device.create_semaphore(&semaphore_info, None)? }
             };
 
-            let render_semaphore = {
-                let semaphore_info = vk::SemaphoreCreateInfo::default();
-                unsafe { device.create_semaphore(&semaphore_info, None)? }
-            };
-
-            let flight_fence = {
+            let frame_fence = {
                 let fence_info = vk::FenceCreateInfo {
                     flags: vk::FenceCreateFlags::SIGNALED,
                     ..Default::default()
@@ -159,11 +156,18 @@ impl WindowData {
             };
 
             image_semaphores.push(image_semaphore);
-            render_semaphores.push(render_semaphore);
-            flight_fences.push(flight_fence);
+            frame_fences.push(frame_fence);
         }
 
-        Ok((image_semaphores, render_semaphores, flight_fences))
+        for _ in 0..swapchain_image_count {
+            let render_semaphore = {
+                let semaphore_info = vk::SemaphoreCreateInfo::default();
+                unsafe { device.create_semaphore(&semaphore_info, None)? }
+            };
+            render_semaphores.push(render_semaphore);
+        }
+
+        Ok((image_semaphores, frame_fences, render_semaphores))
     }
 
     fn create_swapchain(
@@ -310,13 +314,17 @@ impl Drop for WindowData {
             self.device
                 .device_wait_idle()
                 .expect("failed to wait for device idle");
-            for i in 0..self.flight_fences.len() {
-                self.device.destroy_fence(self.flight_fences[i], None);
-                self.device
-                    .destroy_semaphore(self.image_semaphores[i], None);
-                self.device
-                    .destroy_semaphore(self.render_semaphores[i], None);
+
+            for semaphore in &self.image_semaphores {
+                self.device.destroy_semaphore(*semaphore, None);
             }
+            for fence in &self.frame_fences {
+                self.device.destroy_fence(*fence, None);
+            }
+            for semaphore in &self.render_semaphores {
+                self.device.destroy_semaphore(*semaphore, None);
+            }
+
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain, None);
             self.surface_loader.destroy_surface(self.surface, None);

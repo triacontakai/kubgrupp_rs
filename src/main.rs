@@ -22,7 +22,7 @@ use debug::DebugUtilsData;
 use defer::Defer;
 use env_logger::Builder;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
-use log::{debug, warn, LevelFilter};
+use log::{debug, info, warn, LevelFilter};
 use render::renderers::RaytraceRenderer;
 use render::Renderer;
 use scene::scenes::mesh::{MeshScene, MeshSceneUpdate};
@@ -369,7 +369,7 @@ where
             }
             .unwrap()
             .defer(|x| unsafe { surface_loader.destroy_surface(*x, None) });
-            debug!("Created window: {:?}", window.title());
+            info!("Created window: {:?}", window.title());
 
             // surface created - now we pick physical device
             // we start by checking if the device works for the application
@@ -392,6 +392,14 @@ where
             let physical_device = self
                 .pick_physical_device(valid_devices)
                 .expect("failed to find compatible physical device");
+            let physical_device_properties = unsafe {
+                self.instance
+                    .get_physical_device_properties(physical_device)
+            };
+            info!(
+                "Using physical device: {:?}",
+                physical_device_properties.device_name_as_c_str().unwrap()
+            );
             self.physical_device = Some(physical_device);
 
             let queue_family_info =
@@ -493,7 +501,11 @@ where
 
                 if let Some((w, h)) = self.pending_resize {
                     self.scene.camera.handle_resize(w, h);
-                    updates.push(MeshSceneUpdate::NewSize((w, h, self.scene.camera.perspective())));
+                    updates.push(MeshSceneUpdate::NewSize((
+                        w,
+                        h,
+                        self.scene.camera.perspective(),
+                    )));
 
                     self.pending_resize = None;
                 }

@@ -190,11 +190,7 @@ impl AllocatedImage {
         })?;
 
         unsafe {
-            device.bind_image_memory(
-                image,
-                allocation.memory(),
-                allocation.offset(),
-            )?;
+            device.bind_image_memory(image, allocation.memory(), allocation.offset())?;
         }
 
         let image_view = {
@@ -223,7 +219,7 @@ impl AllocatedImage {
             format,
             usage,
             allocation,
-            layout: vk::ImageLayout::UNDEFINED
+            layout: vk::ImageLayout::UNDEFINED,
         })
     }
 
