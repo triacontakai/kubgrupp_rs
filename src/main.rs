@@ -33,7 +33,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::PhysicalKey;
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::{CursorGrabMode, WindowAttributes, WindowId};
 
@@ -474,9 +474,13 @@ where
                 is_synthetic: _is_synthetic,
             } => {
                 if let PhysicalKey::Code(key_code) = input_event.physical_key {
-                    self.scene
-                        .camera
-                        .handle_key_input(key_code, input_event.state.is_pressed());
+                    match key_code {
+                        KeyCode::Escape => event_loop.exit(),
+                        _ => self
+                            .scene
+                            .camera
+                            .handle_key_input(key_code, input_event.state.is_pressed()),
+                    };
                 }
             }
             WindowEvent::Resized(PhysicalSize { width, height }) => {
