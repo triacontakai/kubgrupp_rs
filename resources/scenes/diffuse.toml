@@ -28,6 +28,13 @@ rotate 45 0 0 1
 translate 3 0 5
 '''
 
+[[light]]
+type = "directional"
+color = [2, 0, 0]
+position = [2, 5, 10]
+direction = [0, -0.5, -1]
+radius = 0.5
+
 [[brdf]]
 name = "diffuse"
 chit_shader = "diffuse.rchit"

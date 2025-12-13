@@ -1079,6 +1079,19 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
                 for vertex in vertices {
                     light_data.extend_from_slice(bytemuck::cast_slice(&vertex.to_array()));
                 }
+            } else if let Light::Directional {
+                color,
+                position,
+                direction,
+                radius,
+            } = light
+            {
+                light_data.extend_from_slice(bytemuck::cast_slice(&[2u32]));
+                light_data.extend_from_slice(bytemuck::cast_slice(&color.to_array()));
+                light_data.extend_from_slice(bytemuck::cast_slice(&position.to_array()));
+                light_data.extend_from_slice(bytemuck::cast_slice(&direction.to_array()));
+                light_data.extend_from_slice(&radius.to_ne_bytes());
+                light_data.extend_from_slice(bytemuck::cast_slice(&[0f32; 5]));
             }
         }
 

@@ -96,7 +96,7 @@ void sample_emitter(vec3 hit_pos, vec3 hit_normal, float ks) {
         ray_info.emitter_normal = -dir_to_light;
         ray_info.rad = light.color;
     } else if (light.type == EMITTER_TYPE_AREA) {
-        // sample random point on triangle 
+        // sample random point on triangle
         float s = rnd(ray_info.seed);
         float t = sqrt(rnd(ray_info.seed));
 
@@ -104,14 +104,14 @@ void sample_emitter(vec3 hit_pos, vec3 hit_normal, float ks) {
         float b = (1 - s) * t;
         float c = s * t;
 
-        vec3 ab = light.vertices[1] - light.vertices[0];
-        vec3 ac = light.vertices[2] - light.vertices[0];
+        vec3 ab = light.data[1] - light.data[0];
+        vec3 ac = light.data[2] - light.data[0];
         vec3 normal = cross(ab, ac);
         float area = length(normal) / 2;
         normal = normalize(normal);
 
         ray_info.emitter_o =
-            a * light.vertices[0] + b * light.vertices[1] + c * light.vertices[2];
+            a * light.data[0] + b * light.data[1] + c * light.data[2];
         vec3 dir_to_light = normalize(ray_info.emitter_o - hit_pos);
         ray_info.emitter_pdf = 1.0 / lights.num_lights / area;
         vec4 brdf_eval = eval_brdf(dir_to_light, hit_normal, ks);
@@ -119,6 +119,28 @@ void sample_emitter(vec3 hit_pos, vec3 hit_normal, float ks) {
         ray_info.emitter_brdf_pdf = brdf_eval.w;
         ray_info.emitter_normal = normal;
         ray_info.rad = light.color;
+    } else if (light.type == EMITTER_TYPE_DIRECTIONAL) {
+        vec3 light_dir = normalize(light.data[0]);
+        vec3 dir_to_light = -light_dir;
+        vec4 brdf_eval = eval_brdf(dir_to_light, hit_normal, ks);
+
+        vec3 to_hit = hit_pos - light.position;
+        float along_axis = dot(to_hit, light_dir);
+        vec3 perpendicular = to_hit - along_axis * light_dir;
+        float perp_dist = length(perpendicular);
+        float radius = light.data[1].r;
+
+        vec3 emitter_pos = light.position + max(along_axis - 1.0, 0.0) * light_dir;
+        float dist_sq = max(along_axis * along_axis, 1.0);
+
+        bool in_beam = along_axis > 0.0 && perp_dist <= radius;
+
+        ray_info.emitter_o = emitter_pos;
+        ray_info.emitter_pdf = 1.0 / lights.num_lights;
+        ray_info.emitter_brdf_vals = brdf_eval.xyz;
+        ray_info.emitter_brdf_pdf = brdf_eval.w;
+        ray_info.emitter_normal = -dir_to_light;
+        ray_info.rad = in_beam ? light.color * dist_sq : vec3(0);
     }
 }
 

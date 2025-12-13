@@ -7,7 +7,7 @@ struct Light {
     uint type;
     vec3 color;
     vec3 position;
-    vec3 vertices[3];
+    vec3 data[3]; // area light: data = vertices, directional light: data[0] = direction and data[1].r = radius
 };
 
 struct Offsets {
@@ -16,6 +16,7 @@ struct Offsets {
 
 const uint EMITTER_TYPE_POINT = 0;
 const uint EMITTER_TYPE_AREA = 1;
+const uint EMITTER_TYPE_DIRECTIONAL = 2;
 
 #extension GL_EXT_scalar_block_layout : enable
 
