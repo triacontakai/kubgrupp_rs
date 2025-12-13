@@ -15,7 +15,10 @@ pub struct WindowData {
 
     swapchain_loader: khr::swapchain::Device,
     surface_loader: khr::surface::Instance,
+    vk_lib: Entry,
     device: Device,
+    instance: Instance,
+    physical_device: vk::PhysicalDevice,
 
     image_extent: vk::Extent2D,
     images: Vec<vk::Image>,
@@ -63,7 +66,10 @@ impl WindowData {
             swapchain,
             surface,
             window,
+            vk_lib: vk_lib.clone(),
             device: device.clone(),
+            instance: instance.clone(),
+            physical_device,
             image_extent,
             images,
             current_image: 0,
@@ -85,10 +91,59 @@ impl WindowData {
             ..Default::default()
         };
 
-        unsafe { self.swapchain_loader.queue_present(queue, &present_info)? };
+        let needs_recreate =
+            match unsafe { self.swapchain_loader.queue_present(queue, &present_info) } {
+                Ok(suboptimal) => suboptimal,
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => true,
+                Err(e) => return Err(e.into()),
+            };
+
+        if needs_recreate {
+            self.recreate_swapchain()?;
+        }
 
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        Ok(())
+    }
 
+    fn recreate_swapchain(&mut self) -> Result<()> {
+        unsafe { self.device.device_wait_idle()? };
+        unsafe {
+            self.swapchain_loader
+                .destroy_swapchain(self.swapchain, None)
+        };
+
+        let (swapchain, image_extent, images) = Self::create_swapchain(
+            &self.vk_lib,
+            &self.instance,
+            &self.device,
+            self.physical_device,
+            self.surface,
+            &self.window,
+        )?;
+
+        if images.len() != self.images.len() {
+            self.recreate_render_semaphores(images.len())?;
+        }
+
+        self.swapchain = swapchain;
+        self.image_extent = image_extent;
+        self.images = images;
+        Ok(())
+    }
+
+    fn recreate_render_semaphores(&mut self, count: usize) -> Result<()> {
+        unsafe {
+            for semaphore in &self.render_semaphores {
+                self.device.destroy_semaphore(*semaphore, None);
+            }
+        }
+        self.render_semaphores = (0..count)
+            .map(|_| unsafe {
+                self.device
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(())
     }
 
@@ -113,16 +168,27 @@ impl WindowData {
             self.device.reset_fences(&[frame_fence])?;
         }
 
-        (self.current_image, _) = unsafe {
+        self.current_image = match self.do_acquire(image_semaphore) {
+            Ok((index, _suboptimal)) => index,
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.recreate_swapchain()?;
+                self.do_acquire(image_semaphore)?.0
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        Ok((self.images[self.current_image as usize], self.current_image))
+    }
+
+    fn do_acquire(&self, semaphore: vk::Semaphore) -> std::result::Result<(u32, bool), vk::Result> {
+        unsafe {
             self.swapchain_loader.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
-                image_semaphore,
+                semaphore,
                 vk::Fence::null(),
             )
-        }?;
-
-        Ok((self.images[self.current_image as usize], self.current_image))
+        }
     }
 
     pub fn request_redraw(&self) {
