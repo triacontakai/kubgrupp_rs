@@ -49,6 +49,7 @@ void main() {
 
     ray_info.hit_pos = hit_pos;
     ray_info.hit_normal = hit_normal;
+    ray_info.hit_geo_normal = hit_normal;
     ray_info.is_hit = true;
     ray_info.is_emitter = false;
     ray_info.is_specular = true;

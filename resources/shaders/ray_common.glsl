@@ -11,6 +11,7 @@ struct RayPayload {
     vec3 rad;
     vec3 hit_pos;
     vec3 hit_normal;
+    vec3 hit_geo_normal;
 
     vec3 brdf_vals;
     vec3 brdf_d;

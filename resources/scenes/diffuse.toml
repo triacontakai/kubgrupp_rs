@@ -24,16 +24,17 @@ type = "area"
 color = [20, 20, 20]
 mesh = "square.obj"
 transform = '''
+rotate 180 1 0 0
 rotate 45 0 0 1
 translate 3 0 5
 '''
 
-[[light]]
-type = "directional"
-color = [2, 0, 0]
-position = [2, 5, 10]
-direction = [0, -0.5, -1]
-radius = 0.5
+#[[light]]
+#type = "directional"
+#color = [2, 0, 0]
+#position = [2, 5, 10]
+#direction = [0, -0.5, -1]
+#radius = 0.5
 
 [[brdf]]
 name = "diffuse"
@@ -88,22 +89,30 @@ type = "float"
 [[object]]
 mesh = "cube.obj"
 transform = '''
-translate 0 -2 0
+translate 0 -2 0.1
 '''
 brdf = {name = "diffuse", fields = [[0.2, 0.2, 0.8]]}
 
 [[object]]
 mesh = "cube.obj"
 transform = '''
-translate -.5 -.5 0
+translate -.5 -.5 0.1
 '''
 brdf = {name = "diffuse", fields = [[0.2, 0.8, 0.2]]}
 
 [[object]]
 mesh = "cube.obj"
 transform = '''
+translate -.5 -.5 -5
+'''
+brdf = {name = "diffuse", fields = [[0.2, 0.8, 0.2]]}
+
+
+[[object]]
+mesh = "cube.obj"
+transform = '''
 rotate 45 0 0 1
-translate 1 1 0
+translate 1 1 0.1
 '''
 #brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.2]]}
 brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.2]]}
@@ -112,7 +121,7 @@ brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.2]]}
 mesh = "sphere.obj"
 transform = '''
 scale .5 .5 .5
-translate 3 -1 0.5
+translate 3 -1 0.6
 '''
 #brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.8]]}
 #brdf = {name = "mirror", fields = []}
@@ -122,7 +131,7 @@ brdf = {name = "dielectric", fields = [2.0]}
 [[object]]
 mesh = "square.obj"
 transform = '''
-translate -.5 -.5 -0.0001
+translate -.5 -.5 -0.05
 scale 10 10 1
 '''
 brdf = {name = "diffuse", fields = [[0.6, 0.6, 0.6]]}

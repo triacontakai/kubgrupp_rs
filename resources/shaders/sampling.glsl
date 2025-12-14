@@ -38,6 +38,9 @@ vec3 frame_sample(vec3 wi, vec3 hit_normal) {
     // do this by creating a rotation from (0, 0, 1) to the normal
     vec3 axis = vec3(hit_normal.y, -hit_normal.x, 0);
     if (length(axis) < 0.0001) {
+        if (hit_normal.z < 0.0) {
+            return vec3(wi.x, -wi.y, -wi.z);
+        }
         return wi;
     } else {
         float cos_t = hit_normal.z;

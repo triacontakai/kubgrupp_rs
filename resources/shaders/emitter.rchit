@@ -14,9 +14,6 @@ hitAttributeEXT vec2 bary_coord;
 
 void main() {
     Light light = lights.lights[gl_InstanceCustomIndexEXT];
-    //Vertex a = vertices.vertices[gl_InstanceCustomIndexEXT + 3*gl_PrimitiveID];
-    //Vertex b = vertices.vertices[gl_InstanceCustomIndexEXT + 3*gl_PrimitiveID + 1];
-    //Vertex c = vertices.vertices[gl_InstanceCustomIndexEXT + 3*gl_PrimitiveID + 2];
     vec3 a = light.data[0];
     vec3 b = light.data[1];
     vec3 c = light.data[2];
@@ -35,10 +32,19 @@ void main() {
     float area = length(normal) / 2;
     normal = normalize(normal);
 
+    bool is_backface = dot(gl_WorldRayDirectionEXT, normal) >= 0.0;
+
     ray_info.is_hit = true;
-    ray_info.is_emitter = true;
-    ray_info.rad = light.color;
     ray_info.hit_pos = hit_pos;
-    ray_info.hit_normal = normal;
     ray_info.emitter_pdf = 1.0 / lights.num_lights / area;
+
+    if (is_backface) {
+        ray_info.is_emitter = true;
+        ray_info.rad = vec3(0);
+        ray_info.hit_normal = -normal;
+    } else {
+        ray_info.is_emitter = true;
+        ray_info.rad = light.color;
+        ray_info.hit_normal = normal;
+    }
 }
