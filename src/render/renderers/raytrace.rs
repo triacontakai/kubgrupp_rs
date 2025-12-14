@@ -9,7 +9,9 @@ use crate::{
     features::{vk_features, VkFeatureGuard, VkFeatures},
     render::Renderer,
     scene::{
-        scenes::mesh::{Light, MeshScene, MeshSceneUpdate, Object},
+        scenes::mesh::{
+            Light, MeshScene, MeshSceneUpdate, Object, ProceduralGeometry, ProceduralObject,
+        },
         Scene,
     },
     utils::{align_up, AllocatedBuffer, AllocatedImage, QueueFamilyInfo},
@@ -28,8 +30,11 @@ pub struct RaytraceRenderer {
     compute_queue: vk::Queue,
     top_as: vk::AccelerationStructureKHR,
     top_as_buffer: Option<AllocatedBuffer>,
-    bottom_ass: Vec<vk::AccelerationStructureKHR>,
-    bottom_as_buffers: Vec<AllocatedBuffer>,
+    triangle_blas: Vec<vk::AccelerationStructureKHR>,
+    triangle_blas_buffers: Vec<AllocatedBuffer>,
+    procedural_blas: Vec<vk::AccelerationStructureKHR>,
+    procedural_blas_buffers: Vec<AllocatedBuffer>,
+    triangle_hit_group_count: usize,
     pipeline_layout: vk::PipelineLayout,
     pipeline: vk::Pipeline,
     sbt_buffer: Option<AllocatedBuffer>,
@@ -265,37 +270,111 @@ impl RaytraceRenderer {
         Ok((geometries, buffers, primitive_counts))
     }
 
-    fn get_instance_geometry(
+    fn get_procedural_geometries(
+        &self,
+        procedural_geometries: &[ProceduralGeometry],
+    ) -> anyhow::Result<(
+        Vec<vk::AccelerationStructureGeometryKHR<'static>>,
+        Vec<AllocatedBuffer>,
+        Vec<u32>,
+    )> {
+        let mut geometries = Vec::new();
+        let mut buffers = Vec::new();
+        let mut primitive_counts = Vec::new();
+
+        for proc_geom in procedural_geometries {
+            let aabb_data: Vec<f32> = proc_geom
+                .aabbs
+                .iter()
+                .flat_map(|aabb| {
+                    [
+                        aabb.min.x, aabb.min.y, aabb.min.z, aabb.max.x, aabb.max.y, aabb.max.z,
+                    ]
+                })
+                .collect();
+
+            let aabb_buffer_size = std::mem::size_of::<f32>() * aabb_data.len();
+            let mut aabb_buffer = AllocatedBuffer::new(
+                &self.device,
+                &mut self.allocator.borrow_mut(),
+                aabb_buffer_size as vk::DeviceSize,
+                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                    | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+                MemoryLocation::CpuToGpu,
+                self.device_properties.limits,
+            )?;
+            aabb_buffer.store(&aabb_data)?;
+
+            let geometry = vk::AccelerationStructureGeometryKHR {
+                geometry_type: vk::GeometryTypeKHR::AABBS,
+                geometry: vk::AccelerationStructureGeometryDataKHR {
+                    aabbs: vk::AccelerationStructureGeometryAabbsDataKHR {
+                        data: vk::DeviceOrHostAddressConstKHR {
+                            device_address: unsafe { aabb_buffer.get_device_address(&self.device) },
+                        },
+                        stride: std::mem::size_of::<[f32; 6]>() as u64,
+                        ..Default::default()
+                    },
+                },
+                ..Default::default()
+            };
+
+            geometries.push(geometry);
+            buffers.push(aabb_buffer);
+            primitive_counts.push(proc_geom.aabbs.len() as u32);
+        }
+
+        Ok((geometries, buffers, primitive_counts))
+    }
+
+    fn get_full_instance_geometry(
         &self,
         objects: &[Object],
-        bottom_accel_structs: &[vk::AccelerationStructureKHR],
+        procedural_objects: &[ProceduralObject],
+        triangle_blas: &[vk::AccelerationStructureKHR],
+        procedural_blas: &[vk::AccelerationStructureKHR],
+        triangle_hit_group_count: usize,
     ) -> anyhow::Result<(
         vk::AccelerationStructureGeometryKHR<'static>,
         AllocatedBuffer,
         u32,
     )> {
-        let mut accel_handles = Vec::new();
-        for bottom_accel_struct in bottom_accel_structs {
-            accel_handles.push({
-                let as_addr_info = vk::AccelerationStructureDeviceAddressInfoKHR {
-                    acceleration_structure: *bottom_accel_struct,
+        let triangle_handles: Vec<_> = triangle_blas
+            .iter()
+            .map(|as_| {
+                let info = vk::AccelerationStructureDeviceAddressInfoKHR {
+                    acceleration_structure: *as_,
                     ..Default::default()
                 };
                 unsafe {
                     self.accel_struct_device
-                        .get_acceleration_structure_device_address(&as_addr_info)
+                        .get_acceleration_structure_device_address(&info)
                 }
-            });
-        }
+            })
+            .collect();
+
+        let procedural_handles: Vec<_> = procedural_blas
+            .iter()
+            .map(|as_| {
+                let info = vk::AccelerationStructureDeviceAddressInfoKHR {
+                    acceleration_structure: *as_,
+                    ..Default::default()
+                };
+                unsafe {
+                    self.accel_struct_device
+                        .get_acceleration_structure_device_address(&info)
+                }
+            })
+            .collect();
 
         let mut instances = Vec::new();
+
         for object in objects {
             let mut matrix = [0f32; 16];
             object
                 .transform
                 .transpose()
                 .write_cols_to_slice(&mut matrix);
-
             let mut matrix_3_4 = [0f32; 12];
             matrix_3_4.copy_from_slice(&matrix[0..12]);
 
@@ -307,9 +386,37 @@ impl RaytraceRenderer {
                     vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE.as_raw() as u8,
                 ),
                 acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
-                    device_handle: accel_handles[object.mesh_i],
+                    device_handle: triangle_handles[object.mesh_i],
                 },
             });
+        }
+
+        for proc_obj in procedural_objects {
+            let mut matrix = [0f32; 16];
+            proc_obj
+                .transform
+                .transpose()
+                .write_cols_to_slice(&mut matrix);
+            let mut matrix_3_4 = [0f32; 12];
+            matrix_3_4.copy_from_slice(&matrix[0..12]);
+
+            let sbt_offset = triangle_hit_group_count + proc_obj.geometry_index;
+
+            instances.push(vk::AccelerationStructureInstanceKHR {
+                transform: vk::TransformMatrixKHR { matrix: matrix_3_4 },
+                instance_custom_index_and_mask: vk::Packed24_8::new(proc_obj.custom_index, 0xff),
+                instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
+                    sbt_offset as u32,
+                    vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE.as_raw() as u8,
+                ),
+                acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
+                    device_handle: procedural_handles[proc_obj.geometry_index],
+                },
+            });
+        }
+
+        if instances.is_empty() {
+            return Err(anyhow!("no instances"));
         }
 
         let instance_buffer_size = std::mem::size_of_val(&instances[0]) * instances.len();
@@ -428,7 +535,7 @@ impl RaytraceRenderer {
         &self,
         scene: &MeshScene,
         descriptor_set_layouts: &[vk::DescriptorSetLayout],
-    ) -> anyhow::Result<(vk::PipelineLayout, vk::Pipeline, usize)> {
+    ) -> anyhow::Result<(vk::PipelineLayout, vk::Pipeline, usize, usize)> {
         let push_constant_range = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
             offset: 0,
@@ -504,6 +611,43 @@ impl RaytraceRenderer {
             });
         }
 
+        let triangle_hit_group_count = scene.hit_shaders.len();
+
+        for proc_geom in scene.procedural_geometries.iter() {
+            let int_module = proc_geom
+                .intersection_shader
+                .compile(&self.device)?
+                .module();
+            let hit_module = proc_geom.closest_hit_shader.compile(&self.device)?.module();
+
+            let int_stage_index = shader_stages.len() as u32;
+            shader_stages.push(vk::PipelineShaderStageCreateInfo {
+                stage: vk::ShaderStageFlags::INTERSECTION_KHR,
+                module: int_module,
+                p_name: c"main".as_ptr(),
+                ..Default::default()
+            });
+            shaders.push(int_module);
+
+            let hit_stage_index = shader_stages.len() as u32;
+            shader_stages.push(vk::PipelineShaderStageCreateInfo {
+                stage: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                module: hit_module,
+                p_name: c"main".as_ptr(),
+                ..Default::default()
+            });
+            shaders.push(hit_module);
+
+            shader_groups.push(vk::RayTracingShaderGroupCreateInfoKHR {
+                ty: vk::RayTracingShaderGroupTypeKHR::PROCEDURAL_HIT_GROUP,
+                general_shader: vk::SHADER_UNUSED_KHR,
+                closest_hit_shader: hit_stage_index,
+                any_hit_shader: vk::SHADER_UNUSED_KHR,
+                intersection_shader: int_stage_index,
+                ..Default::default()
+            });
+        }
+
         let pipeline = unsafe {
             let out = self.rt_pipeline_device.create_ray_tracing_pipelines(
                 vk::DeferredOperationKHR::null(),
@@ -533,7 +677,12 @@ impl RaytraceRenderer {
             }
         }
 
-        Ok((pipeline_layout, pipeline, shader_groups.len()))
+        Ok((
+            pipeline_layout,
+            pipeline,
+            shader_groups.len(),
+            triangle_hit_group_count,
+        ))
     }
 
     unsafe fn copy_buffer(
@@ -939,8 +1088,11 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             compute_queue,
             top_as: Default::default(),
             top_as_buffer: Default::default(),
-            bottom_ass: Default::default(),
-            bottom_as_buffers: Default::default(),
+            triangle_blas: Default::default(),
+            triangle_blas_buffers: Default::default(),
+            procedural_blas: Default::default(),
+            procedural_blas_buffers: Default::default(),
+            triangle_hit_group_count: 0,
             pipeline_layout: Default::default(),
             pipeline: Default::default(),
             sbt_buffer: Default::default(),
@@ -997,7 +1149,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         let (mesh_geometries, mesh_buffers, mesh_primitive_counts) =
             self.get_mesh_geometries(&scene.meshes)?;
 
-        (self.bottom_ass, self.bottom_as_buffers) = self.build_accel_structs(
+        (self.triangle_blas, self.triangle_blas_buffers) = self.build_accel_structs(
             vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
             &mesh_geometries,
             &mesh_primitive_counts,
@@ -1009,8 +1161,41 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
             }
         }
 
-        let (instance_geometry, instance_buffer, instance_count) =
-            self.get_instance_geometry(&scene.objects, &self.bottom_ass)?;
+        if !scene.procedural_geometries.is_empty() {
+            let (proc_geometries, proc_buffers, proc_primitive_counts) =
+                self.get_procedural_geometries(&scene.procedural_geometries)?;
+
+            (self.procedural_blas, self.procedural_blas_buffers) = self.build_accel_structs(
+                vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
+                &proc_geometries,
+                &proc_primitive_counts,
+            )?;
+            for buf in proc_buffers {
+                unsafe {
+                    buf.destroy(&self.device, &mut self.allocator.borrow_mut());
+                }
+            }
+        }
+
+        let descriptor_sizes: Vec<vk::DescriptorPoolSize>;
+        (self.descriptor_set_layout, descriptor_sizes) = self.get_descriptor_set_layout()?;
+
+        let shader_group_count: usize;
+        (
+            self.pipeline_layout,
+            self.pipeline,
+            shader_group_count,
+            self.triangle_hit_group_count,
+        ) = self.create_pipeline(scene, &[self.descriptor_set_layout])?;
+
+        let (instance_geometry, instance_buffer, instance_count) = self
+            .get_full_instance_geometry(
+                &scene.objects,
+                &scene.procedural_objects,
+                &self.triangle_blas,
+                &self.procedural_blas,
+                self.triangle_hit_group_count,
+            )?;
 
         (self.top_as, self.top_as_buffer) = {
             let (top_as, mut top_as_buffer) = self.build_accel_structs(
@@ -1023,13 +1208,6 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         unsafe {
             instance_buffer.destroy(&self.device, &mut self.allocator.borrow_mut());
         }
-
-        let descriptor_sizes: Vec<vk::DescriptorPoolSize>;
-        (self.descriptor_set_layout, descriptor_sizes) = self.get_descriptor_set_layout()?;
-
-        let shader_group_count: usize;
-        (self.pipeline_layout, self.pipeline, shader_group_count) =
-            self.create_pipeline(scene, &[self.descriptor_set_layout])?;
 
         let sbt_buffer: AllocatedBuffer;
         (
@@ -1084,6 +1262,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
                 position,
                 direction,
                 radius,
+                ..
             } = light
             {
                 light_data.extend_from_slice(bytemuck::cast_slice(&[2u32]));
@@ -1384,12 +1563,21 @@ impl Drop for RaytraceRenderer {
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
 
-            for bottom_as in self.bottom_ass.iter() {
+            for blas in self.triangle_blas.iter() {
                 self.accel_struct_device
-                    .destroy_acceleration_structure(*bottom_as, None);
+                    .destroy_acceleration_structure(*blas, None);
             }
-            while !self.bottom_as_buffers.is_empty() {
-                self.bottom_as_buffers
+            while !self.triangle_blas_buffers.is_empty() {
+                self.triangle_blas_buffers
+                    .swap_remove(0)
+                    .destroy(&self.device, &mut self.allocator.borrow_mut());
+            }
+            for blas in self.procedural_blas.iter() {
+                self.accel_struct_device
+                    .destroy_acceleration_structure(*blas, None);
+            }
+            while !self.procedural_blas_buffers.is_empty() {
+                self.procedural_blas_buffers
                     .swap_remove(0)
                     .destroy(&self.device, &mut self.allocator.borrow_mut());
             }

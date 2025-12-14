@@ -1,0 +1,80 @@
+[global_shaders]
+raygen = "path.rgen"
+miss = "black.rmiss"
+emitter_hit = "emitter.rchit"
+directional_emitter_int = "disc.rint"
+directional_emitter_hit = "directional_emitter.rchit"
+
+[camera]
+view = '''
+lookat 4 0 2   0 0 0    0 0 1
+'''
+fov = 70
+
+[[light]]
+type = "directional"
+color = [1, 1, 1]
+position = [2, 5, 10]
+direction = [0, -0.5, -1]
+radius = 1.0
+
+[[light]]
+type = "area"
+color = [5, 5, 5]
+mesh = "square.obj"
+transform = '''
+rotate 180 1 0 0
+rotate 45 0 0 1
+translate 3 0 5
+'''
+
+[[procedural_geometry]]
+name = "sphere"
+aabbs = [[-1, -1, -1, 1, 1, 1]]
+intersection_shader = "sphere.rint"
+closest_hit_shader = "procedural_diffuse.rchit"
+
+[[procedural_object]]
+geometry = "sphere"
+transform = '''
+translate 3 3 1
+scale 0.5 0.5 0.5
+'''
+
+[[brdf]]
+name = "diffuse"
+chit_shader = "diffuse.rchit"
+[[brdf.field]]
+name = "albedo"
+type = "vec3"
+
+[[object]]
+mesh = "cube.obj"
+transform = '''
+translate 0 -2 0.1
+'''
+brdf = {name = "diffuse", fields = [[0.2, 0.2, 0.8]]}
+
+[[object]]
+mesh = "cube.obj"
+transform = '''
+translate -.5 -.5 0.1
+'''
+brdf = {name = "diffuse", fields = [[0.2, 0.8, 0.2]]}
+
+[[object]]
+mesh = "sphere.obj"
+transform = '''
+scale .5 .5 .5
+translate 3 -1 0.6
+'''
+brdf = {name = "diffuse", fields = [[0.8, 0.2, 0.8]]}
+
+[[object]]
+mesh = "square.obj"
+transform = '''
+translate -.5 -.5 -0.05
+scale 10 10 1
+'''
+brdf = {name = "diffuse", fields = [[0.6, 0.6, 0.6]]}
+

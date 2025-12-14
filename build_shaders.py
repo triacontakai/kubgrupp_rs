@@ -8,7 +8,7 @@ shader_dir = "resources/shaders"
 output_dir = os.path.join(shader_dir, "spv")
 
 # Supported shader extensions
-shader_extensions = [".rchit", ".rmiss", ".rgen"]
+shader_extensions = [".rchit", ".rmiss", ".rgen", ".rint"]
 
 # Ensure the output directory exists
 os.makedirs(output_dir, exist_ok=True)
@@ -19,7 +19,7 @@ for filename in os.listdir(shader_dir):
     if any(filename.endswith(ext) for ext in shader_extensions):
         shader_path = os.path.join(shader_dir, filename)
         output_path = os.path.join(output_dir, f"{filename}.spv")
-        
+
         try:
             # Compile the shader using glslc
             subprocess.run(

@@ -1,0 +1,35 @@
+#version 460
+
+#extension GL_EXT_ray_tracing : enable
+
+hitAttributeEXT vec3 hit_normal;
+
+void main() {
+    vec3 ray_origin = gl_ObjectRayOriginEXT;
+    vec3 ray_dir = gl_ObjectRayDirectionEXT;
+
+    vec3 disc_normal = vec3(0, 0, 1);
+    float disc_radius = 1.0;
+
+    float denom = dot(ray_dir, disc_normal);
+
+    if (abs(denom) < 1e-6) {
+        return;
+    }
+
+    float t = -dot(ray_origin, disc_normal) / denom;
+
+    if (t < gl_RayTminEXT || t > gl_RayTmaxEXT) {
+        return;
+    }
+
+    vec3 hit_point = ray_origin + t * ray_dir;
+    float dist_from_center = length(hit_point.xy);
+
+    if (dist_from_center > disc_radius) {
+        return;
+    }
+
+    hit_normal = disc_normal;
+    reportIntersectionEXT(t, 0);
+}

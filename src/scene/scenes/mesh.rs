@@ -42,6 +42,9 @@ pub struct MeshScene {
     pub miss_shader: Shader,
     pub hit_shaders: Vec<Shader>,
 
+    pub procedural_geometries: Vec<ProceduralGeometry>,
+    pub procedural_objects: Vec<ProceduralObject>,
+
     pub brdf_buf: Vec<u8>,
     pub offset_buf: Vec<u32>,
 }
@@ -81,6 +84,26 @@ pub struct Object {
 
     // this is pretty much just the base of the mesh in the list of all vertices
     pub vertex_index: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Aabb {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+#[derive(Debug)]
+pub struct ProceduralGeometry {
+    pub aabbs: Vec<Aabb>,
+    pub intersection_shader: Shader,
+    pub closest_hit_shader: Shader,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProceduralObject {
+    pub transform: Mat4,
+    pub geometry_index: usize,
+    pub custom_index: u32,
 }
 
 #[derive(Debug, PartialEq)]
@@ -162,6 +185,9 @@ impl MeshScene {
             Self::parse_toml_objects(&conf, &mesh_map, &meshes, &shaders.rchit, &shader_type_map)?;
         let lights = Self::parse_toml_lights(&conf, &mesh_map, &meshes, &mut objects)?;
 
+        let (procedural_geometries, procedural_objects) =
+            Self::parse_procedural_geometries(&conf, &lights)?;
+
         let (brdf_buf, offset_buf) =
             Self::get_brdf_params_buffer_and_indices(&objects, &shaders.rchit);
 
@@ -173,6 +199,8 @@ impl MeshScene {
             raygen_shader: shaders.raygen,
             miss_shader: shaders.miss,
             hit_shaders: shaders.rchit,
+            procedural_geometries,
+            procedural_objects,
             brdf_buf,
             offset_buf,
         })
@@ -232,7 +260,7 @@ impl MeshScene {
                     0
                 };
 
-                data.extend(iter::repeat(0).take(padding));
+                data.extend(iter::repeat_n(0, padding));
                 assert!(data.len() % param_size == 0);
 
                 let start_index = data.len() / param_size;
@@ -902,6 +930,184 @@ impl MeshScene {
             "vec2" => ShaderType::Vec2,
             s => bail!("invalid typename: {s}"),
         })
+    }
+
+    fn parse_procedural_geometries(
+        conf: &Table,
+        lights: &[Light],
+    ) -> Result<(Vec<ProceduralGeometry>, Vec<ProceduralObject>)> {
+        let mut geometries = Vec::new();
+        let mut geometry_map = HashMap::new();
+        let mut objects = Vec::new();
+
+        if let Some(Value::Array(geom_confs)) = conf.get("procedural_geometry") {
+            for geom_conf in geom_confs {
+                let Value::Table(geom_conf) = geom_conf else {
+                    bail!("procedural_geometry must be a table");
+                };
+
+                let name = Self::get_string(geom_conf, "name")?;
+                let int_shader_name = Self::get_string(geom_conf, "intersection_shader")?;
+                let hit_shader_name = Self::get_string(geom_conf, "closest_hit_shader")?;
+
+                let int_shader = Self::parse_toml_shader(
+                    &Value::String(int_shader_name.clone()),
+                    &format!("{}_int", name),
+                )?;
+                let hit_shader = Self::parse_toml_shader(
+                    &Value::String(hit_shader_name.clone()),
+                    &format!("{}_hit", name),
+                )?;
+
+                let aabbs_conf = Self::get_array(geom_conf, "aabbs")?;
+                let mut aabbs = Vec::new();
+                for aabb_conf in aabbs_conf {
+                    let Value::Array(coords) = aabb_conf else {
+                        bail!("aabb must be an array of 6 floats [min_x, min_y, min_z, max_x, max_y, max_z]");
+                    };
+                    if coords.len() != 6 {
+                        bail!("aabb must have exactly 6 values");
+                    }
+                    let min_x = Self::parse_toml_f32(&coords[0])?;
+                    let min_y = Self::parse_toml_f32(&coords[1])?;
+                    let min_z = Self::parse_toml_f32(&coords[2])?;
+                    let max_x = Self::parse_toml_f32(&coords[3])?;
+                    let max_y = Self::parse_toml_f32(&coords[4])?;
+                    let max_z = Self::parse_toml_f32(&coords[5])?;
+                    aabbs.push(Aabb {
+                        min: Vec3::new(min_x, min_y, min_z),
+                        max: Vec3::new(max_x, max_y, max_z),
+                    });
+                }
+
+                geometry_map.insert(name.clone(), geometries.len());
+                geometries.push(ProceduralGeometry {
+                    aabbs,
+                    intersection_shader: int_shader,
+                    closest_hit_shader: hit_shader,
+                });
+            }
+        }
+
+        if let Some(Value::Array(obj_confs)) = conf.get("procedural_object") {
+            for obj_conf in obj_confs {
+                let Value::Table(obj_conf) = obj_conf else {
+                    bail!("procedural_object must be a table");
+                };
+
+                let geom_name = Self::get_string(obj_conf, "geometry")?;
+                let geometry_index = *geometry_map
+                    .get(geom_name)
+                    .ok_or_else(|| anyhow!("unknown procedural geometry: {}", geom_name))?;
+
+                let transform =
+                    Self::parse_toml_transform(Self::get_field(obj_conf, "transform")?)?;
+
+                let custom_index = obj_conf
+                    .get("custom_index")
+                    .map(|v| match v {
+                        Value::Integer(i) => Ok(*i as u32),
+                        _ => bail!("custom_index must be an integer"),
+                    })
+                    .transpose()?
+                    .unwrap_or(0);
+
+                objects.push(ProceduralObject {
+                    transform,
+                    geometry_index,
+                    custom_index,
+                });
+            }
+        }
+
+        let directional_lights: Vec<_> = lights
+            .iter()
+            .enumerate()
+            .filter_map(|(i, l)| match l {
+                Light::Directional {
+                    position,
+                    direction,
+                    radius,
+                    ..
+                } => Some((i, *position, direction.normalize(), *radius)),
+                _ => None,
+            })
+            .collect();
+
+        if !directional_lights.is_empty() {
+            let global_shaders = conf
+                .get("global_shaders")
+                .and_then(|v| v.as_table())
+                .ok_or_else(|| anyhow!("global_shaders required when using directional lights"))?;
+
+            let int_shader_name = global_shaders
+                .get("directional_emitter_int")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    anyhow!(
+                        "global_shaders.directional_emitter_int required for directional lights"
+                    )
+                })?;
+            let hit_shader_name = global_shaders
+                .get("directional_emitter_hit")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    anyhow!(
+                        "global_shaders.directional_emitter_hit required for directional lights"
+                    )
+                })?;
+
+            let int_shader = Self::parse_toml_shader(
+                &Value::String(int_shader_name.to_string()),
+                "directional_emitter_int",
+            )?;
+            let hit_shader = Self::parse_toml_shader(
+                &Value::String(hit_shader_name.to_string()),
+                "directional_emitter_hit",
+            )?;
+
+            let geometry_index = geometries.len();
+            geometries.push(ProceduralGeometry {
+                aabbs: vec![Aabb {
+                    min: Vec3::new(-1.0, -1.0, -0.001),
+                    max: Vec3::new(1.0, 1.0, 0.001),
+                }],
+                intersection_shader: int_shader,
+                closest_hit_shader: hit_shader,
+            });
+
+            for (light_index, position, direction, radius) in directional_lights {
+                let transform = Self::compute_light_geometry_transform(position, direction, radius);
+                objects.push(ProceduralObject {
+                    transform,
+                    geometry_index,
+                    custom_index: light_index as u32,
+                });
+            }
+        }
+
+        Ok((geometries, objects))
+    }
+
+    fn compute_light_geometry_transform(position: Vec3, direction: Vec3, radius: f32) -> Mat4 {
+        let target_normal = direction.normalize();
+        let object_normal = Vec3::Z;
+
+        let rotation = if object_normal.dot(target_normal).abs() > 0.9999 {
+            if object_normal.dot(target_normal) > 0.0 {
+                glam::Quat::IDENTITY
+            } else {
+                glam::Quat::from_axis_angle(Vec3::X, PI)
+            }
+        } else {
+            glam::Quat::from_rotation_arc(object_normal, target_normal)
+        };
+
+        let scale = Mat4::from_scale(Vec3::new(radius, radius, 1.0));
+        let rotation_mat = Mat4::from_quat(rotation);
+        let translation = Mat4::from_translation(position);
+
+        translation * rotation_mat * scale
     }
 
     fn parse_toml_camera(conf: &Table) -> Result<Camera> {
