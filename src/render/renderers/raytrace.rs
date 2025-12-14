@@ -1351,7 +1351,7 @@ impl Renderer<MeshScene, WindowData> for RaytraceRenderer {
         queue_family_info.compute_index.is_some() && queue_family_info.present_index.is_some()
     }
 
-    fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> Vec<vk::DeviceQueueCreateInfo> {
+    fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> Vec<vk::DeviceQueueCreateInfo<'_>> {
         let create_info = vk::DeviceQueueCreateInfo {
             queue_family_index: queue_family_info.compute_index.unwrap(),
             queue_count: 1,

@@ -30,5 +30,5 @@ where
     fn required_features() -> VkFeatureGuard<'static>;
 
     fn has_required_queue_families(queue_family_info: &QueueFamilyInfo) -> bool;
-    fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> Vec<vk::DeviceQueueCreateInfo>;
+    fn get_queue_info(queue_family_info: &QueueFamilyInfo) -> Vec<vk::DeviceQueueCreateInfo<'_>>;
 }

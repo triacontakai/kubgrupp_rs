@@ -162,7 +162,7 @@ impl<'a> VkFeatureGuard<'a> {
     }
 
     /// Gets an immutable reference to the underlying `PhysicalDeviceFeatures2` struct
-    pub fn get(&self) -> &vk::PhysicalDeviceFeatures2 {
+    pub fn get(&self) -> &vk::PhysicalDeviceFeatures2<'_> {
         unsafe { &*self.head }
     }
 
