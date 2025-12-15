@@ -78,7 +78,7 @@ impl Camera {
             ),
         );
         key_movements.insert(
-            KeyCode::ShiftLeft,
+            KeyCode::ControlLeft,
             (
                 Direction::Down,
                 Box::new(|dir: &Vec3| dir.cross(Vec3::new(dir.y, -dir.x, 0f32).normalize())),

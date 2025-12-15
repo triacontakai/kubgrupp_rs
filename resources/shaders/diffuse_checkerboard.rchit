@@ -6,6 +6,10 @@
 
 #include "ray_common.glsl"
 #include "hit_common.glsl"
+#include "mesh_common.glsl"
+#include "random.glsl"
+#include "sampling.glsl"
+#include "emitter_sampling.glsl"
 
 layout(location = 0) rayPayloadInEXT RayPayload ray_info;
 
@@ -21,32 +25,49 @@ layout(scalar, set = 0, binding = BRDF_PARAMS_BINDING) readonly buffer Fields {
     BrdfParams params[];
 } instance_info;
 
-void main() {
-    Vertex a = vertices.vertices[gl_InstanceCustomIndexEXT + 3*gl_PrimitiveID];
-    Vertex b = vertices.vertices[gl_InstanceCustomIndexEXT + 3*gl_PrimitiveID + 1];
-    Vertex c = vertices.vertices[gl_InstanceCustomIndexEXT + 3*gl_PrimitiveID + 2];
-
-    vec3 full_bary_coord = vec3(1 - bary_coord.x - bary_coord.y, bary_coord);
-
-    vec3 hit_pos =
-        a.position * full_bary_coord.x
-        + b.position * full_bary_coord.y
-        + c.position * full_bary_coord.z;
-    vec3 final_pos = gl_ObjectToWorldEXT * vec4(hit_pos, 0);
-
+vec3 get_albedo(vec3 pos) {
     uint brdf_i = offsets.offsets[gl_InstanceID].brdf_i;
     BrdfParams brdf = instance_info.params[brdf_i];
+    vec2 rem = floor(mod(pos.xy, vec2(2.0 * brdf.scale)));
+    return (rem.x == rem.y) ? brdf.albedo_1 : brdf.albedo_2;
+}
 
-    vec3 albedo;
+vec4 eval_brdf(vec3 wi, vec3 hit_normal, vec3 albedo) {
+    float cos_theta = max(0.0, dot(wi, hit_normal));
+    float pdf = cos_theta / PI;
+    return vec4(albedo, pdf);
+}
 
-    vec2 rem = floor(mod(final_pos.xy, vec2(brdf.scale + brdf.scale)));
-    if (rem.x == rem.y) {
-        albedo = brdf.albedo_1;
-    } else {
-        albedo = brdf.albedo_2;
-    }
+void sample_brdf(vec3 hit_normal, vec3 albedo) {
+    vec4 cos_sample = sample_cosine_hemisphere(rnd(ray_info.seed), rnd(ray_info.seed));
+    ray_info.brdf_vals = albedo;
+    ray_info.brdf_pdf = cos_sample.w;
+    ray_info.brdf_d = frame_sample(cos_sample.xyz, hit_normal);
+}
 
-    ray_info.rad = albedo;
+void sample_emitter(vec3 hit_pos, vec3 hit_normal, vec3 albedo) {
+    EmitterSample light = sample_light(hit_pos, ray_info.seed);
+    vec4 brdf_eval = eval_brdf(light.direction, hit_normal, albedo);
+
+    ray_info.emitter_o = light.position;
+    ray_info.emitter_pdf = light.pdf;
+    ray_info.emitter_brdf_vals = brdf_eval.xyz;
+    ray_info.emitter_brdf_pdf = brdf_eval.w;
+    ray_info.emitter_normal = light.normal;
+    ray_info.rad = light.radiance;
+}
+
+void main() {
+    MeshHitInfo hit = compute_mesh_hit(bary_coord);
+    vec3 albedo = get_albedo(hit.position);
+
+    sample_emitter(hit.position, hit.normal, albedo);
+    sample_brdf(hit.normal, albedo);
+
+    ray_info.hit_pos = hit.position;
+    ray_info.hit_normal = hit.normal;
+    ray_info.hit_geo_normal = hit.geo_normal;
     ray_info.is_hit = true;
-    ray_info.is_emitter = true;
+    ray_info.is_emitter = false;
+    ray_info.is_specular = false;
 }

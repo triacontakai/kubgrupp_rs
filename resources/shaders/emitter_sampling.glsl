@@ -28,7 +28,7 @@ EmitterSample sample_light(vec3 hit_pos, inout uint seed) {
         vec3 ab = light.data[1] - light.data[0];
         vec3 ac = light.data[2] - light.data[0];
         vec3 normal = cross(ab, ac);
-        float area = length(normal) / 2;
+        float area = length(normal) * 0.5;
         normal = normalize(normal);
 
         result.position = a * light.data[0] + b * light.data[1] + c * light.data[2];

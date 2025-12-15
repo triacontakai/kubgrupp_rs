@@ -9,6 +9,9 @@
 
 layout(location = 0) rayPayloadEXT RayPayload ray_info;
 
+const float T_MIN = 0.0001;
+const float T_MAX = 1000.0;
+
 void main() {
     const vec2 pixel_center = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
     const vec2 in_uv = pixel_center / vec2(gl_LaunchSizeEXT.xy);
@@ -20,8 +23,6 @@ void main() {
     vec4 direction = view_inverse * vec4(normalize(target.xyz), 0);
 
     const uint ray_flags = gl_RayFlagsOpaqueEXT;
-    const float t_min = 0.001;
-    const float t_max = 1000.0;
 
     traceRayEXT(
         tlas,
@@ -31,9 +32,9 @@ void main() {
         0,
         0,
         origin.xyz,
-        t_min,
+        T_MIN,
         direction.xyz,
-        t_max,
+        T_MAX,
         0
     );
 

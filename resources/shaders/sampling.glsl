@@ -1,20 +1,21 @@
 vec4 sample_cosine_hemisphere(float u, float v) {
-    float theta = acos(sqrt(u));
-    float phi = 2 * PI * v;
+    float cos_theta = sqrt(u);
+    float sin_theta = sqrt(1.0 - u);
+    float phi = 2.0 * PI * v;
 
-    return vec4(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta), cos(theta)/PI);
+    return vec4(sin_theta * cos(phi), sin_theta * sin(phi), cos_theta, cos_theta / PI);
 }
 
 vec3 sample_beckmann(float a, float u, float v) {
     float cos_t = sqrt(1.0 / (1.0 - a * a * log(u)));
     float sin_t = sqrt(1.0 - cos_t * cos_t);
 
-    float phi = 2 * PI * v;
+    float phi = 2.0 * PI * v;
     return vec3(sin_t * cos(phi), sin_t * sin(phi), cos_t);
 }
 
 float pdf_beckmann(float cos_t, float a) {
-    float tan_t_2 = 1 / (cos_t * cos_t) - 1;
+    float tan_t_2 = 1.0 / (cos_t * cos_t) - 1.0;
     return exp(-tan_t_2 / (a * a)) / (PI * a * a * cos_t * cos_t * cos_t);
 }
 
@@ -34,20 +35,16 @@ float fresnel(float cos_i, float eta) {
 }
 
 vec3 frame_sample(vec3 wi, vec3 hit_normal) {
-    // we need to convert the wi sample to be relative to the normal
-    // do this by creating a rotation from (0, 0, 1) to the normal
-    vec3 axis = vec3(hit_normal.y, -hit_normal.x, 0);
-    if (length(axis) < 0.0001) {
-        if (hit_normal.z < 0.0) {
-            return vec3(wi.x, -wi.y, -wi.z);
-        }
-        return wi;
-    } else {
-        float cos_t = hit_normal.z;
-        float sin_t = length(axis);
-        vec3 r = normalize(axis);
-        return wi * cos_t
-            + cross(wi, r) * sin_t
-            + r * dot(r, wi) * (1 - cos_t);
+    vec3 axis = vec3(hit_normal.y, -hit_normal.x, 0.0);
+    float axis_len_sq = dot(axis, axis);
+
+    if (axis_len_sq < 0.0001) {
+        return hit_normal.z < 0.0 ? vec3(wi.x, -wi.y, -wi.z) : wi;
     }
+
+    float cos_t = hit_normal.z;
+    float sin_t = sqrt(axis_len_sq);
+    vec3 r = axis / sin_t;
+
+    return wi * cos_t + cross(wi, r) * sin_t + r * dot(r, wi) * (1.0 - cos_t);
 }
